@@ -2,14 +2,22 @@ openapi: 3.1.0
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
-  description: API specification
+  version: 0.2.0
+  description: Cultural Collision Atlas API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: atlas
+    description: Atlas workspace and Qloo connection
+  - name: discoveries
+    description: Cultural bridge discovery and saved discoveries
+  - name: plans
+    description: Activation plans
+  - name: opportunities
+    description: Geographic opportunity data
 paths:
   /healthz:
     get:
@@ -24,6 +32,227 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /atlas/overview:
+    get:
+      operationId: getAtlasOverview
+      tags: [atlas]
+      summary: Get workspace overview
+      responses:
+        "200":
+          description: Workspace totals and connection state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasOverview"
+  /qloo/status:
+    get:
+      operationId: getQlooStatus
+      tags: [atlas]
+      summary: Read Qloo configuration state
+      responses:
+        "200":
+          description: Qloo connection state without exposing credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QlooStatus"
+  /qloo/test:
+    post:
+      operationId: testQlooConnection
+      tags: [atlas]
+      summary: Verify an authenticated request to Qloo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QlooTestInput"
+      responses:
+        "200":
+          description: Authenticated connection test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QlooStatus"
+        "503":
+          description: Qloo credentials are not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /qloo/entities/search:
+    post:
+      operationId: searchQlooEntities
+      tags: [atlas]
+      summary: Search Qloo's entity catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntitySearchInput"
+      responses:
+        "200":
+          description: Entity search results returned by Qloo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitySearchResponse"
+        "503":
+          description: Qloo credentials are not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /discoveries:
+    post:
+      operationId: discoverCulturalBridges
+      tags: [discoveries]
+      summary: Request cultural bridge candidates
+      description: Calls Qloo when configured. Returns an explicit setup error otherwise; never substitutes sample recommendations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscoveryInput"
+      responses:
+        "200":
+          description: Live Qloo evidence and clearly labeled derived bridge candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResponse"
+        "400":
+          description: Both interests must first be resolved to Qloo entities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Qloo credentials are not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /discoveries/saved:
+    get:
+      operationId: listSavedDiscoveries
+      tags: [discoveries]
+      summary: List saved discoveries
+      responses:
+        "200":
+          description: Saved discoveries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedDiscovery"
+    post:
+      operationId: saveDiscovery
+      tags: [discoveries]
+      summary: Save a discovery result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDiscoveryInput"
+      responses:
+        "201":
+          description: Saved discovery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedDiscovery"
+  /discoveries/saved/{id}:
+    delete:
+      operationId: deleteSavedDiscovery
+      tags: [discoveries]
+      summary: Delete a saved discovery
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Saved discovery deleted
+        "404":
+          description: Saved discovery not found
+  /activation-plans:
+    get:
+      operationId: listActivationPlans
+      tags: [plans]
+      summary: List saved activation plans
+      responses:
+        "200":
+          description: Saved plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivationPlan"
+    post:
+      operationId: saveActivationPlan
+      tags: [plans]
+      summary: Save an activation plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavePlanInput"
+      responses:
+        "201":
+          description: Saved plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationPlan"
+  /activation-plans/{id}:
+    delete:
+      operationId: deleteActivationPlan
+      tags: [plans]
+      summary: Delete a saved activation plan
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Plan deleted
+        "404":
+          description: Plan not found
+  /opportunities/heatmap:
+    post:
+      operationId: getOpportunityHeatmap
+      tags: [opportunities]
+      summary: Request Qloo heatmap evidence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HeatmapInput"
+      responses:
+        "200":
+          description: Geographic affinity evidence returned by Qloo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeatmapResponse"
+        "503":
+          description: Qloo credentials are not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +262,170 @@ components:
           type: string
       required:
         - status
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+        setupInstructions: { type: string }
+      required: [error]
+    QlooStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [not_configured, configured_unverified, verified, error]
+        configured: { type: boolean }
+        verified: { type: boolean }
+        message: { type: string }
+        checkedAt: { type: ["string", "null"], format: date-time }
+      required: [state, configured, verified, message]
+    QlooTestInput:
+      type: object
+      properties:
+        query: { type: string, minLength: 1, maxLength: 120 }
+      required: [query]
+    EntitySearchInput:
+      type: object
+      properties:
+        query: { type: string, minLength: 1, maxLength: 120 }
+      required: [query]
+    EntityEvidence:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: ["string", "null"] }
+        subtype: { type: ["string", "null"] }
+        source: { type: string }
+      required: [id, name, source]
+    EntitySearchResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [qloo_api] }
+        entities:
+          type: array
+          items: { $ref: "#/components/schemas/EntityEvidence" }
+      required: [source, entities]
+    DiscoveryInput:
+      type: object
+      properties:
+        interestA: { type: string, minLength: 1, maxLength: 120 }
+        interestB: { type: string, minLength: 1, maxLength: 120 }
+        interestAId: { type: string, minLength: 1, maxLength: 160 }
+        interestBId: { type: string, minLength: 1, maxLength: 160 }
+        city: { type: string, minLength: 1, maxLength: 120 }
+        activationType:
+          type: string
+          enum: [pop-up, live_event, brand_collaboration, retail_experience, community_event]
+        budgetRange: { type: string, minLength: 1, maxLength: 80 }
+        objective: { type: string, minLength: 1, maxLength: 300 }
+        audienceDescription: { type: string, maxLength: 500 }
+      required: [interestA, interestB, city, activationType, budgetRange, objective, interestAId, interestBId]
+    EvidenceItem:
+      type: object
+      properties:
+        source: { type: string }
+        label: { type: string }
+        value: { type: string }
+        kind:
+          type: string
+          enum: [observed_api, external_data, derived, hypothesis]
+      required: [source, label, value, kind]
+    BridgeCandidate:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        explanation: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        scoreDescription: { type: string }
+        confidence: { type: string, enum: [low, medium, high] }
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/EvidenceItem" }
+      required: [id, name, explanation, score, scoreDescription, confidence, evidence]
+    DiscoveryResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [qloo_api] }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/BridgeCandidate" }
+        caveat: { type: string }
+        generatedAt: { type: string, format: date-time }
+      required: [source, candidates, caveat, generatedAt]
+    SaveDiscoveryInput:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        city: { type: string, minLength: 1, maxLength: 120 }
+        interestA: { type: string, minLength: 1, maxLength: 120 }
+        interestB: { type: string, minLength: 1, maxLength: 120 }
+        result: { type: object, additionalProperties: true }
+      required: [title, city, interestA, interestB, result]
+    SavedDiscovery:
+      allOf:
+        - $ref: "#/components/schemas/SaveDiscoveryInput"
+        - type: object
+          properties:
+            id: { type: integer }
+            createdAt: { type: string, format: date-time }
+          required: [id, createdAt]
+    PlanSection:
+      type: object
+      properties:
+        title: { type: string }
+        content: { type: string }
+      required: [title, content]
+    SavePlanInput:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        city: { type: string, minLength: 1, maxLength: 120 }
+        interestA: { type: string, minLength: 1, maxLength: 120 }
+        interestB: { type: string, minLength: 1, maxLength: 120 }
+        bridgeName: { type: string, minLength: 1, maxLength: 160 }
+        objective: { type: string, minLength: 1, maxLength: 300 }
+        plan: { type: object, additionalProperties: true }
+      required: [title, city, interestA, interestB, bridgeName, objective, plan]
+    ActivationPlan:
+      allOf:
+        - $ref: "#/components/schemas/SavePlanInput"
+        - type: object
+          properties:
+            id: { type: integer }
+            createdAt: { type: string, format: date-time }
+          required: [id, createdAt]
+    HeatmapInput:
+      type: object
+      properties:
+        city: { type: string, minLength: 1, maxLength: 120 }
+        entityId: { type: string, minLength: 1, maxLength: 160 }
+      required: [city, entityId]
+    HeatmapPoint:
+      type: object
+      properties:
+        latitude: { type: number }
+        longitude: { type: number }
+        affinity: { type: number }
+        affinityRank: { type: number }
+        popularity: { type: number }
+      required: [latitude, longitude]
+    HeatmapResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [qloo_api] }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/HeatmapPoint" }
+      required: [source, points]
+    AtlasOverview:
+      type: object
+      properties:
+        savedDiscoveries: { type: integer }
+        savedPlans: { type: integer }
+        qloo:
+          $ref: "#/components/schemas/QlooStatus"
+        venueProviderConfigured: { type: boolean }
+      required: [savedDiscoveries, savedPlans, qloo, venueProviderConfigured]
 

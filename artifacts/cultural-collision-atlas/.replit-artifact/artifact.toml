@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Cultural Collision Atlas"
+description = "An evidence-aware cultural intelligence workspace for discovering bridges between interests and shaping activation plans."
+version = "1.0.0"
+id = "artifacts/cultural-collision-atlas"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20038
+
+[services.development]
+run = "pnpm --filter @workspace/cultural-collision-atlas run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cultural-collision-atlas", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/cultural-collision-atlas/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20038"
+BASE_PATH = "/"

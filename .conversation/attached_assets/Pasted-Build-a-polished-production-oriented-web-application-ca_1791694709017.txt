@@ -1,0 +1,122 @@
+Build a polished, production-oriented web application called **Cultural Collision Atlas**.
+
+## Product purpose
+
+Cultural Collision Atlas is an AI-powered cultural intelligence platform for experiential marketing agencies and brand activation teams.
+
+Its core promise: discover the unexpected third cultural interest, entity, or experience connecting two different cultural interests, then turn that discovery into a feasible real-world activation.
+
+Example: a team enters gaming and streetwear, chooses Delhi, and receives evidence-backed cultural bridge candidates, geographic context, potential venues, and an activation proposal.
+
+## Technology
+
+- React with TypeScript and Vite.
+- Tailwind CSS for styling.
+- Lucide icons.
+- A Node.js/Express backend with TypeScript.
+- Use a clean, modular architecture.
+- Keep API credentials exclusively on the server using environment variables.
+- Create a README with setup instructions and required environment variables.
+
+## Visual direction
+
+Create a premium, futuristic cultural-intelligence workspace. Use a dark charcoal/navy background, restrained violet and electric-cyan accents, subtle gradients, clean typography, crisp data visualizations, generous spacing, tasteful motion and excellent responsive behavior.
+
+The interface should feel like a sophisticated intelligence product, not a generic chatbot or an ordinary admin template.
+
+## Main application layout
+
+Create a collapsible left sidebar with:
+- Overview
+- Discover Bridges
+- Opportunity Atlas
+- Activation Plans
+- Saved Discoveries
+- Settings
+
+Include a top navigation bar with the product name, workspace selector, and clear project status.
+
+## Screen 1: Discovery Studio
+
+Create a visually impressive discovery form with:
+- Cultural Interest A
+- Cultural Interest B
+- Target city
+- Activation type: pop-up, live event, brand collaboration, retail experience, or community event
+- Budget range
+- Campaign objective
+- Optional audience description
+
+Include a prominent “Discover Cultural Bridges” button.
+
+## Screen 2: Cultural Bridge Explorer
+
+Design a results experience showing:
+- The two original cultural interests.
+- Candidate third-node bridges.
+- Why each candidate could connect the two interests.
+- Evidence from each original interest.
+- Source attribution and confidence labels.
+- A transparent bridge score with a description of its calculation.
+- A clear distinction between observed API evidence and product-generated hypotheses.
+
+Allow users to open a candidate and inspect its evidence.
+
+## Screen 3: Opportunity Atlas
+
+Provide a geographic opportunity interface with:
+- A map area.
+- Location-based cultural context.
+- Potential venues and their source information.
+- Venue suitability, available evidence, and practical constraints.
+- Filters for city, activation type, budget, and candidate bridge.
+
+Do not invent real venues, addresses, capacities, ratings, or geographic statistics.
+
+## Screen 4: Activation Planner
+
+Generate an activation-plan workspace containing:
+- Campaign concept and rationale.
+- Target audience hypothesis.
+- Recommended experience.
+- Venue options.
+- Budget breakdown.
+- Execution timeline.
+- Required partners and resources.
+- Risks and mitigations.
+- Success metrics.
+- A proposed audience-interest test.
+
+Allow users to save and export a plan.
+
+## Architecture and data integrity
+
+Create backend modules for:
+- Qloo entity and tag lookup.
+- Qloo recommendation requests.
+- Single-interest and joint-interest comparisons.
+- Explainability extraction.
+- Geographic heatmap requests.
+- External venue-data integration.
+- Bridge-candidate ranking.
+- Activation-plan generation.
+
+Prepare a server-side Qloo client that reads QLOO_API_KEY from environment variables. Never expose this key to the frontend.
+
+Do not assume undocumented API fields. Keep endpoint paths and request construction isolated so they can be adjusted to the official API schema.
+
+Do not pretend that the Qloo integration is live until a real authenticated request succeeds. If credentials are unavailable, show a clear setup state and explain how to configure the integration.
+
+You may include clearly labeled sample scenarios for UI development, but never present sample data as real Qloo results. Every result should distinguish real API evidence, external data, derived calculations, and AI-generated hypotheses.
+
+Do not claim cultural affinity proves that the same individuals share two interests or guarantees campaign success.
+
+## Initial implementation scope
+
+First deliver a complete, navigable application shell with all four screens, polished responsive UI, reusable components, typed data models, loading states, empty states, error handling, and a clear Qloo connection status.
+
+Implement the backend scaffolding and environment-variable configuration. Do not build fake integrations or invent successful API calls.
+
+Make the app runnable in Replit, verify the build, fix errors, and document the exact steps needed to connect a real Qloo API key.
+
+Prioritize a working, visually impressive foundation that we can extend into the actual cultural bridge discovery engine.

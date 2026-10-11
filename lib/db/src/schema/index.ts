@@ -1,3 +1,6 @@
+export * from "./activation-plans";
+export * from "./saved-discoveries";
+
 // Export your models here. Add one export per file
 // export * from "./posts";
 //

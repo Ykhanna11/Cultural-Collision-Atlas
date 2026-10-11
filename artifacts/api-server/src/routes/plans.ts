@@ -1,0 +1,53 @@
+import { Router, type IRouter } from "express";
+import {
+  DeleteActivationPlanParams,
+  ListActivationPlansResponse,
+  SaveActivationPlanBody,
+  SaveActivationPlanResponse,
+} from "@workspace/api-zod";
+import { desc, eq } from "drizzle-orm";
+import { activationPlansTable, db } from "@workspace/db";
+
+const router: IRouter = Router();
+
+router.get("/activation-plans", async (_req, res): Promise<void> => {
+  const plans = await db
+    .select()
+    .from(activationPlansTable)
+    .orderBy(desc(activationPlansTable.createdAt));
+  res.json(ListActivationPlansResponse.parse(plans));
+});
+
+router.post("/activation-plans", async (req, res): Promise<void> => {
+  const parsed = SaveActivationPlanBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [plan] = await db
+    .insert(activationPlansTable)
+    .values(parsed.data)
+    .returning();
+  res.status(201).json(SaveActivationPlanResponse.parse(plan));
+});
+
+router.delete("/activation-plans/:id", async (req, res): Promise<void> => {
+  const parsed = DeleteActivationPlanParams.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [deleted] = await db
+    .delete(activationPlansTable)
+    .where(eq(activationPlansTable.id, parsed.data.id))
+    .returning({ id: activationPlansTable.id });
+  if (!deleted) {
+    res.status(404).json({ error: "Activation plan not found." });
+    return;
+  }
+  res.sendStatus(204);
+});
+
+export default router;
