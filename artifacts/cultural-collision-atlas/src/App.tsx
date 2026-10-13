@@ -142,7 +142,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div>
+      <div className={sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[246px]'}>
         <header className="sticky top-0 z-20 border-b border-white/[.065] bg-[#0e121e]/85 backdrop-blur-xl">
           <div className="mx-auto flex h-[62px] max-w-[1600px] items-center justify-between px-4 sm:px-7 lg:px-10">
             <div className="flex items-center gap-3">
@@ -157,7 +157,7 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
           {mobileMenu && <nav className="grid grid-cols-2 gap-1 border-t border-white/[.06] p-3 lg:hidden">{navItems.map((item) => { const Icon = item.icon; return <Link key={item.href} href={item.href} onClick={() => setMobileMenu(false)} className={cx('flex items-center gap-2 rounded-lg px-3 py-2.5 text-[11px]', location === item.href ? 'bg-violet-300/10 text-violet-100' : 'text-[#a3acc0]')}><Icon size={14} />{item.label}</Link>; })}</nav>}
         </header>
-        <main className={cx('mx-auto max-w-[1600px] px-4 pb-16 pt-7 transition-[padding] duration-200 sm:px-7 sm:pt-9 lg:px-10', sidebarCollapsed ? 'lg:pl-[76px]' : 'lg:pl-[246px]')}>{children}</main>
+        <main className="mx-auto max-w-[1600px] px-4 pb-16 pt-7 sm:px-7 sm:pt-9 lg:px-10">{children}</main>
       </div>
     </div>
   );
@@ -348,9 +348,17 @@ function EvidenceKind({ kind }: { kind: string }) {
 function AtlasPage() {
   const overview = useGetAtlasOverview();
   const [city, setCity] = useState('');
+  const [entityQuery, setEntityQuery] = useState('');
   const [entityId, setEntityId] = useState('');
   const heatmap = useGetOpportunityHeatmap();
   const status = useGetQlooStatus();
+  const catalogSearch = useSearchQlooEntities();
+  const searchCatalog = () => {
+    if (!entityQuery.trim()) return;
+    setEntityId('');
+    catalogSearch.reset();
+    catalogSearch.mutate({ data: { query: entityQuery.trim() } });
+  };
   const run = (event: FormEvent) => {
     event.preventDefault();
     if (!city.trim() || !entityId.trim() || !status.data?.configured) return;
@@ -374,7 +382,36 @@ function AtlasPage() {
         {heatmap.data && <div className="mt-3 flex flex-wrap gap-4 text-[9px] text-[#7e8a9f]"><span>Response source: <b className="font-medium text-[#b6c0d2]">{heatmap.data.source}</b></span><span>Points: <b className="font-medium text-[#b6c0d2]">{points.length}</b></span></div>}
       </Panel>
       <div className="space-y-5">
-        <Panel><div className="eyebrow text-[9px] text-[#8a7cc0]">Query the source</div><h2 className="mt-1 text-[15px] font-semibold">Request heatmap</h2><p className="mt-2 text-[10px] leading-5 text-[#838ea3]">Use the entity identifier returned by a catalog search. IDs are not guessed.</p><form onSubmit={run} className="mt-4 space-y-3"><Field label="City" required><input value={city} onChange={(e) => setCity(e.target.value)} className="field" placeholder="City name" data-testid="input-atlas-city" /></Field><Field label="Entity ID" required><input value={entityId} onChange={(e) => setEntityId(e.target.value)} className="field" placeholder="Qloo entity identifier" data-testid="input-entity-id" /></Field><Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending || !status.data?.configured} type="submit"><Radar size={14} />Request spatial signal</Button></form></Panel>
+        <Panel>
+          <div className="eyebrow text-[9px] text-[#8a7cc0]">Query the source</div>
+          <h2 className="mt-1 text-[15px] font-semibold">Request heatmap</h2>
+          <p className="mt-2 text-[10px] leading-5 text-[#838ea3]">Choose a bridge from Qloo’s entity catalog. The heatmap is requested only for the returned entity ID.</p>
+          <form onSubmit={run} className="mt-4 space-y-3">
+            <Field label="City" required><input value={city} onChange={(e) => setCity(e.target.value)} className="field" placeholder="City name" data-testid="input-atlas-city" /></Field>
+            <Field label="Bridge / cultural entity" required>
+              <div className="flex gap-2">
+                <input value={entityQuery} onChange={(e) => { setEntityQuery(e.target.value); setEntityId(''); }} className="field min-w-0 flex-1" placeholder="Search the catalog" data-testid="input-atlas-bridge" />
+                <Button variant="outline" type="button" disabled={!entityQuery.trim() || catalogSearch.isPending || !status.data?.configured} onClick={searchCatalog} aria-label="Search Qloo catalog">{catalogSearch.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}</Button>
+              </div>
+            </Field>
+            {catalogSearch.isError && <div className="text-[10px] text-rose-200/80">Catalog search failed. Check the Qloo connection in Settings.</div>}
+            {catalogSearch.data && <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-white/[.08] p-2" role="listbox" aria-label="Qloo catalog results">
+              {catalogSearch.data.entities.length ? catalogSearch.data.entities.map((entity) => <button type="button" key={entity.id} role="option" aria-selected={entityId === entity.id} onClick={() => { setEntityId(entity.id); setEntityQuery(entity.name); }} className={cx('flex w-full items-start justify-between gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]', entityId === entity.id && 'bg-cyan-100/[.06]')}>
+                <span className="min-w-0"><span className="block truncate text-[10px] text-[#d4dbe7]">{entity.name}</span><span className="mono mt-1 block break-all text-[8px] text-[#718096]">{entity.id}</span></span><span className="shrink-0 text-[8px] text-[#7f8ba0]">{entity.type ?? entity.subtype ?? 'Entity'}</span>
+              </button>) : <div className="px-2 py-3 text-[10px] text-[#818ca1]">No matching entities returned.</div>}
+            </div>}
+            {entityId && <div className="rounded-lg border border-cyan-100/10 bg-cyan-100/[.025] px-3 py-2 text-[9px] text-[#9bdae0]">Selected Qloo ID <span className="mono ml-1 break-all text-[#b5c4d3]">{entityId}</span></div>}
+            <Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending || !status.data?.configured} type="submit"><Radar size={14} />Request spatial signal</Button>
+          </form>
+          <div className="mt-5 border-t border-white/[.07] pt-4">
+            <div className="eyebrow text-[9px] text-[#78849a]">Venue planning filters</div>
+            <p className="mt-1 text-[9px] leading-4 text-[#79859a]">These filters apply to sourced venue records, not Qloo’s affinity heatmap. They stay unavailable until a venue provider is configured.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Field label="Activation type"><select className="field opacity-45" disabled aria-label="Activation type venue filter"><option>Any type</option></select></Field>
+              <Field label="Budget range"><select className="field opacity-45" disabled aria-label="Budget venue filter"><option>Any range</option></select></Field>
+            </div>
+          </div>
+        </Panel>
         <Panel><div className="eyebrow text-[9px] text-[#78849a]">How to read this</div><div className="mt-3 space-y-3"><EvidenceLegend color="bg-[#67d9e2]" title="Returned coordinates" description="Only plotted when supplied by the API." /><EvidenceLegend color="bg-[#e5b96d]" title="Venue layer" description={overview.data?.venueProviderConfigured ? 'Provider configured; venue coverage is still source-dependent.' : 'Not configured for this workspace.'} /></div><div className="mt-4 border-t border-white/[.07] pt-3 text-[9px] leading-5 text-[#747f94]">A point field is not a venue recommendation or proof of event suitability.</div></Panel>
       </div>
     </div>
@@ -394,16 +431,22 @@ function PlansPage() {
   const [saveError, setSaveError] = useState(false);
   const planContent = useMemo(() => draft ? ({
     sections: [
-      { title: 'Strategic premise', content: `Hypothesis: ${draft.candidate.name} may create a relevant meeting point between ${draft.form.interestA} and ${draft.form.interestB}. Validate the bridge with audience research before committing spend.` },
-      { title: 'Experience direction', content: `Planning hypothesis for a ${draft.form.activationType.replaceAll('_', ' ')} in ${draft.form.city}: design a participatory moment around the bridge, with clear brand utility and cultural contributors shaping the experience.` },
-      { title: 'Audience & objective', content: `${draft.form.audienceDescription || 'Audience definition requires client validation.'} Objective: ${draft.form.objective}` },
-      { title: 'Next validation steps', content: 'Confirm community relevance with local partners; test the concept with the intended audience; validate operations, permissions, and budget against real supplier quotes.' },
+      { title: 'Strategic rationale', content: `Observed bridge candidate: ${draft.candidate.name}. Hypothesis: it may provide a relevant meeting point between ${draft.form.interestA} and ${draft.form.interestB}. The aggregate affinity evidence does not establish that the same individuals share both interests.` },
+      { title: 'Audience hypothesis', content: draft.form.audienceDescription?.trim() || `Hypothesis to validate: some people in ${draft.form.city} interested in ${draft.form.interestA} may also respond to an experience involving ${draft.form.interestB}. The audience has not been identified or measured.` },
+      { title: 'Recommended experience', content: `Working concept for a ${draft.form.activationType.replaceAll('_', ' ')} in ${draft.form.city}: prototype a participatory experience around ${draft.candidate.name}, with cultural contributors shaping the concept. This is a creative direction, not a validated recommendation. Objective supplied for planning: ${draft.form.objective}` },
+      { title: 'Venue options', content: 'None sourced. No venue-data provider is connected, so no venue names, addresses, capacities, availability, or suitability claims are included.' },
+      { title: 'Budget breakdown', content: `No itemized vendor quotes are available. The entered range (${draft.form.budgetRange}) is a user-supplied planning constraint, not an estimate. Obtain sourced quotes for venue, production, contributors, accessibility, insurance, staffing, and measurement before approving spend.` },
+      { title: 'Execution timeline', content: '1. Validate the concept with the intended audience and local contributors before booking. 2. Source venues and partners; confirm availability, permissions, accessibility, and itemized costs. 3. Produce a small opt-in pilot only after approvals. 4. Measure the agreed objectives during and after the pilot; timing depends on partner and venue confirmation.' },
+      { title: 'Partners and resources', content: 'To source and validate: local cultural contributors, a venue host, a production lead, research support, accessibility and safety support, and any required permits. No partner is confirmed.' },
+      { title: 'Risks and mitigations', content: 'The bridge may not resonate: test it with the intended audience first. The concept may feel extractive or tokenizing: involve compensated cultural contributors early and give them meaningful decision-making power. Venue, permissions, and costs are unknown: obtain written confirmation and itemized quotes before committing.' },
+      { title: 'Success metrics', content: 'Proposed measures to agree before the pilot: qualified opt-ins, participation rate, concept recall, participant-reported relevance, and follow-up interest in the experience. No target values or outcomes are forecast.' },
+      { title: 'Audience-interest test', content: `Run a small, opt-in concept test with people who self-identify as interested in ${draft.form.interestA}, ${draft.form.interestB}, or both. Show a neutral ${draft.candidate.name} experience concept, measure stated relevance, and record how the sample was recruited. Stated interest is not a forecast of attendance or campaign performance.` },
     ],
-    planningEstimates: { budgetRange: draft.form.budgetRange, status: 'Planning input supplied by user; not a supplier quote.' },
+    planningEstimates: { budgetRange: draft.form.budgetRange, status: 'User-supplied planning input only; not a cost estimate or supplier quote.' },
     evidence: draft.candidate.evidence,
     source: draft.response.source,
     caveat: draft.response.caveat,
-    assumptions: ['Experience direction is a product hypothesis.', 'No venue or supplier has been identified.', 'Costs, attendance, and outcomes are not validated estimates.'],
+    assumptions: ['Audience fit and experience direction are hypotheses to test.', 'No venue, partner, permit, or supplier quote has been confirmed.', 'Costs, attendance, and campaign outcomes are not estimates or guarantees.'],
   }) : null, [draft]);
   const saveCurrent = (event: FormEvent) => {
     event.preventDefault();
