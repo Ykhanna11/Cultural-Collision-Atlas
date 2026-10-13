@@ -1,0 +1,27 @@
+Update the existing Cultural Collision Atlas Qloo integration to use the official Qloo Agentic Hackathon API configuration.
+
+Important: Hackathon-issued credentials must use `https://hackathon.api.qloo.com`, not `https://api.qloo.com`.
+
+Before making changes:
+1. Inspect the existing README, backend routes, Qloo client, Settings connection test, Discovery Studio, and Cultural Bridge Explorer.
+2. Preserve the existing application, styling, persistence, and working features.
+3. Check the official hackathon developer guide and API specification for endpoint paths, parameters, authentication, and response schemas.
+
+Requirements:
+
+- Configure the server-side Qloo API base URL as `https://hackathon.api.qloo.com`.
+- Read the API key from the Replit Secret `QLOO_API_KEY`.
+- Send the key in the documented `x-api-key` header.
+- Never expose, print, log, or commit the API key.
+- Ensure the base URL can be configured server-side without rebuilding the frontend.
+- Repair the existing Settings connection test using a documented, minimal valid Qloo request.
+- Implement entity/tag resolution using documented hackathon-supported workflows or API endpoints.
+- Connect the existing Discovery Studio to real A-only, B-only, and combined-interest recommendations, using compatible query settings and documented explainability where supported.
+- Display actual returned candidates and their evidence in the Cultural Bridge Explorer.
+- Handle missing credentials, authentication failures, invalid requests, rate limits, and empty results accurately.
+- Never report a successful connection without a successful authenticated API response.
+- Never fabricate live results, entity IDs, explainability scores, or venue data.
+- Verify the build and typecheck, then run a real connection test if credentials are configured.
+- Report exactly what works, which live tests passed, and what remains blocked.
+
+If the documented API behavior differs from the existing implementation, adapt the implementation to the official hackathon documentation. Do not replace the application or start a new project.
