@@ -1,4 +1,6 @@
-const QLOO_BASE_URL = "https://api.qloo.com";
+const QLOO_BASE_URL =
+  process.env.QLOO_BASE_URL?.trim() ||
+  "https://hackathon.api.qloo.com";
 const QLOO_API_KEY_ENV = "QLOO_API_KEY";
 
 export class QlooApiError extends Error {
@@ -69,7 +71,7 @@ export async function qlooGet<T = unknown>(
   const url = new URL(path, QLOO_BASE_URL);
   for (const [key, value] of Object.entries(query)) {
     if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(key, item);
+      url.searchParams.set(key, value.join(","));
     } else {
       url.searchParams.set(key, value);
     }

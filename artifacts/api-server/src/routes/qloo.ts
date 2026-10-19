@@ -54,7 +54,7 @@ router.post("/qloo/test", async (req, res): Promise<void> => {
       TestQlooConnectionResponse.parse({
         ...getQlooStatus(),
         message:
-          "Qloo is not connected. Add QLOO_API_KEY to the project's Secrets, then test the connection again.",
+          "Qloo is not connected. Configure QLOO_API_KEY in the server environment, then test the connection again.",
       }),
     );
     return;
@@ -80,7 +80,10 @@ router.post("/qloo/entities/search", async (req, res): Promise<void> => {
   }
 
   try {
-    const entities = await searchQlooEntities(parsed.data.query);
+    const entities = await searchQlooEntities(
+      parsed.data.query,
+      parsed.data.types,
+    );
     res.json(SearchQlooEntitiesResponse.parse({ source: "qloo_api", entities }));
   } catch (error) {
     req.log.warn(

@@ -74,7 +74,8 @@ export const searchQlooEntitiesBodyQueryMax = 120;
 
 
 export const SearchQlooEntitiesBody = zod.object({
-  "query": zod.string().min(1).max(searchQlooEntitiesBodyQueryMax)
+  "query": zod.string().min(1).max(searchQlooEntitiesBodyQueryMax),
+  "types": zod.array(zod.enum(['urn:entity:artist', 'urn:entity:book', 'urn:entity:brand', 'urn:entity:locality', 'urn:entity:movie', 'urn:entity:person', 'urn:entity:place', 'urn:entity:podcast', 'urn:entity:tv_show', 'urn:entity:videogame'])).optional()
 })
 
 export const SearchQlooEntitiesResponse = zod.object({
@@ -84,6 +85,7 @@ export const SearchQlooEntitiesResponse = zod.object({
   "name": zod.string(),
   "type": zod.string().nullish(),
   "subtype": zod.string().nullish(),
+  "description": zod.string().nullish(),
   "source": zod.string()
 }))
 })

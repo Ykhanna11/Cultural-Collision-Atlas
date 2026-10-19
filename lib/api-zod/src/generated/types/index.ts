@@ -16,6 +16,7 @@ export * from './discoveryResponse';
 export * from './discoveryResponseSource';
 export * from './entityEvidence';
 export * from './entitySearchInput';
+export * from './entitySearchInputTypesItem';
 export * from './entitySearchResponse';
 export * from './entitySearchResponseSource';
 export * from './errorResponse';

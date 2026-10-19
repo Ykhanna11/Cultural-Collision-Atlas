@@ -41,12 +41,29 @@ export interface QlooTestInput {
   query: string;
 }
 
+export type EntitySearchInputTypesItem = typeof EntitySearchInputTypesItem[keyof typeof EntitySearchInputTypesItem];
+
+
+export const EntitySearchInputTypesItem = {
+  'urn:entity:artist': 'urn:entity:artist',
+  'urn:entity:book': 'urn:entity:book',
+  'urn:entity:brand': 'urn:entity:brand',
+  'urn:entity:locality': 'urn:entity:locality',
+  'urn:entity:movie': 'urn:entity:movie',
+  'urn:entity:person': 'urn:entity:person',
+  'urn:entity:place': 'urn:entity:place',
+  'urn:entity:podcast': 'urn:entity:podcast',
+  'urn:entity:tv_show': 'urn:entity:tv_show',
+  'urn:entity:videogame': 'urn:entity:videogame',
+} as const;
+
 export interface EntitySearchInput {
   /**
      * @minLength 1
      * @maxLength 120
      */
   query: string;
+  types?: EntitySearchInputTypesItem[];
 }
 
 export interface EntityEvidence {
@@ -56,6 +73,8 @@ export interface EntityEvidence {
   type?: string | null;
   /** @nullable */
   subtype?: string | null;
+  /** @nullable */
+  description?: string | null;
   source: string;
 }
 

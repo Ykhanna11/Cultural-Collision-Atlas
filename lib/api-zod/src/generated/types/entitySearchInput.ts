@@ -5,6 +5,7 @@
  * Cultural Collision Atlas API
  * OpenAPI spec version: 0.2.0
  */
+import type { EntitySearchInputTypesItem } from './entitySearchInputTypesItem';
 
 export interface EntitySearchInput {
   /**
@@ -12,4 +13,5 @@ export interface EntitySearchInput {
      * @maxLength 120
      */
   query: string;
+  types?: EntitySearchInputTypesItem[];
 }

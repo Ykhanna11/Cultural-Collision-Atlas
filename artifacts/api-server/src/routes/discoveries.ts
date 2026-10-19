@@ -15,7 +15,6 @@ import {
   compareSingleInterest,
 } from "../lib/qloo/insights";
 import { isQlooConfigured } from "../lib/qloo/client";
-import { extractExplainability } from "../lib/qloo/explainability";
 
 const router: IRouter = Router();
 
@@ -29,7 +28,7 @@ router.post("/discoveries", async (req, res): Promise<void> => {
     res.status(503).json({
       error: "Qloo is not connected. No bridge candidates were generated.",
       setupInstructions:
-        "Add QLOO_API_KEY in the Replit project's Secrets, then verify the connection in Settings.",
+        "Configure QLOO_API_KEY in the server environment, then verify the connection in Settings.",
     });
     return;
   }
@@ -44,37 +43,25 @@ router.post("/discoveries", async (req, res): Promise<void> => {
 
     const ranked = rankBridgeCandidates({
       interestA: input.interestA,
+      interestAId: input.interestAId,
       interestB: input.interestB,
+      interestBId: input.interestBId,
       resultsA,
       resultsB,
       jointResults,
     });
-    const hasExplainability = [
-      extractExplainability(resultsA),
-      extractExplainability(resultsB),
-      extractExplainability(jointResults),
-    ].some(Boolean);
-    const candidates = ranked.map(({ explainability: _explainability, ...candidate }) => ({
-      ...candidate,
-      ...(hasExplainability && {
-        evidence: [
-          ...candidate.evidence,
-          {
-            source: "Qloo Insights API",
-            label: "Explainability metadata",
-            value: "Qloo returned explainability metadata for this comparison.",
-            kind: "observed_api" as const,
-          },
-        ],
-      }),
-    }));
-
+    const hasTwoSidedCandidates = ranked.some(
+      (candidate) => candidate.confidence === "high",
+    );
     res.json(
       DiscoverCulturalBridgesResponse.parse({
         source: "qloo_api",
-        candidates,
+        candidates: ranked,
         caveat:
-          "Qloo affinity is aggregate cultural evidence. It does not prove that the same individuals share both interests or predict activation success. The bridge score is a derived ranking aid, not a probability.",
+          "Qloo's joint-interest results and any matching single-interest results are aggregate recommendation evidence. Candidate confidence indicates whether per-result explainability explicitly returned positive contributions from both selected entities, one, or neither; Qloo may omit lower-impact contributions. This does not prove that the same individuals share both interests or predict activation success. The score is derived only from returned Qloo affinity or affinity rank, not input attribution or probability." +
+          (hasTwoSidedCandidates
+            ? ""
+            : " No returned candidate has explicit positive per-result attribution from both selected entities; one-sided or unavailable-attribution results should be treated as exploratory, not substantiated two-interest bridges."),
         generatedAt: new Date(),
       }),
     );

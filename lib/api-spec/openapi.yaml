@@ -288,6 +288,21 @@ components:
       type: object
       properties:
         query: { type: string, minLength: 1, maxLength: 120 }
+        types:
+          type: array
+          items:
+            type: string
+            enum:
+              - urn:entity:artist
+              - urn:entity:book
+              - urn:entity:brand
+              - urn:entity:locality
+              - urn:entity:movie
+              - urn:entity:person
+              - urn:entity:place
+              - urn:entity:podcast
+              - urn:entity:tv_show
+              - urn:entity:videogame
       required: [query]
     EntityEvidence:
       type: object
@@ -296,6 +311,7 @@ components:
         name: { type: string }
         type: { type: ["string", "null"] }
         subtype: { type: ["string", "null"] }
+        description: { type: ["string", "null"] }
         source: { type: string }
       required: [id, name, source]
     EntitySearchResponse:
@@ -428,4 +444,3 @@ components:
           $ref: "#/components/schemas/QlooStatus"
         venueProviderConfigured: { type: boolean }
       required: [savedDiscoveries, savedPlans, qloo, venueProviderConfigured]
-

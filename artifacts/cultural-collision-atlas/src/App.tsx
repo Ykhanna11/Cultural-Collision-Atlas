@@ -232,6 +232,20 @@ function EmptyInline({ title, description }: { title: string; description: strin
 }
 
 const defaultForm: DiscoveryInput = { interestA: '', interestB: '', interestAId: '', interestBId: '', city: '', activationType: 'pop-up', budgetRange: '', objective: '', audienceDescription: '' };
+const entitySearchTypes = [
+  { value: 'urn:entity:artist', label: 'Artist' },
+  { value: 'urn:entity:book', label: 'Book' },
+  { value: 'urn:entity:brand', label: 'Brand' },
+  { value: 'urn:entity:locality', label: 'Locality' },
+  { value: 'urn:entity:movie', label: 'Movie' },
+  { value: 'urn:entity:person', label: 'Person' },
+  { value: 'urn:entity:place', label: 'Place' },
+  { value: 'urn:entity:podcast', label: 'Podcast' },
+  { value: 'urn:entity:tv_show', label: 'TV show' },
+  { value: 'urn:entity:videogame', label: 'Video game' },
+] as const;
+type EntitySearchType = typeof entitySearchTypes[number]['value'];
+
 function DiscoveryPage() {
   const [, setLocation] = useLocation();
   const [form, setForm] = useState<DiscoveryInput>(defaultForm);
@@ -240,6 +254,7 @@ function DiscoveryPage() {
   const [savedMessage, setSavedMessage] = useState('');
   const [entitySide, setEntitySide] = useState<'a' | 'b' | null>(null);
   const [entityText, setEntityText] = useState('');
+  const [entitySearchType, setEntitySearchType] = useState<EntitySearchType | ''>('');
   const discover = useDiscoverCulturalBridges();
   const search = useSearchQlooEntities();
   const save = useSaveDiscovery();
@@ -259,7 +274,12 @@ function DiscoveryPage() {
     if (!query.trim()) return;
     setEntitySide(side);
     setEntityText(query);
-    search.mutate({ data: { query } });
+    search.mutate({
+      data: {
+        query,
+        ...(entitySearchType && { types: [entitySearchType] }),
+      },
+    });
   };
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
@@ -280,20 +300,21 @@ function DiscoveryPage() {
           <div className="mb-5 flex items-start justify-between"><div><div className="eyebrow text-[9px] text-[#8c80bf]">Comparison brief</div><h2 className="mt-1 text-[16px] font-semibold">Define your inputs</h2></div><span className="mono rounded-md border border-white/[.09] px-2 py-1 text-[9px] text-[#788398]">01—07</span></div>
           <form onSubmit={submit} className="space-y-4">
             <div className="grid grid-cols-[1fr_26px_1fr] items-end gap-2">
-              <Field label="Cultural interest A" required><input className="field" maxLength={120} value={form.interestA} onChange={(e) => { change('interestA', e.target.value); change('interestAId', ''); }} placeholder="e.g. interest or entity" data-testid="input-interest-a" /></Field>
+              <Field label="Cultural interest A" required><input className="field" maxLength={120} value={form.interestA} onChange={(e) => { change('interestA', e.target.value); change('interestAId', ''); setEntitySide(null); }} placeholder="e.g. interest or entity" data-testid="input-interest-a" /></Field>
               <div className="mb-3 flex justify-center text-[#8170c9]"><ArrowLeftRight size={15} /></div>
-              <Field label="Cultural interest B" required><input className="field" maxLength={120} value={form.interestB} onChange={(e) => { change('interestB', e.target.value); change('interestBId', ''); }} placeholder="Second interest" data-testid="input-interest-b" /></Field>
+              <Field label="Cultural interest B" required><input className="field" maxLength={120} value={form.interestB} onChange={(e) => { change('interestB', e.target.value); change('interestBId', ''); setEntitySide(null); }} placeholder="Second interest" data-testid="input-interest-b" /></Field>
             </div>
             <div className="flex justify-between gap-2">
               <Button type="button" variant="quiet" className="px-0 text-[10px]" onClick={() => searchEntity('a')} disabled={!form.interestA.trim() || search.isPending}><Search size={12} />Search catalog A</Button>
               <Button type="button" variant="quiet" className="px-0 text-[10px]" onClick={() => searchEntity('b')} disabled={!form.interestB.trim() || search.isPending}><Search size={12} />Search catalog B</Button>
             </div>
+            <Field label="Optional catalog category"><select className="field" value={entitySearchType} onChange={(event) => { setEntitySearchType(event.target.value as EntitySearchType | ''); setEntitySide(null); }} data-testid="select-entity-search-type"><option value="">Any category</option>{entitySearchTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></Field>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Entity ID · A" required><input className="field mono text-[10px]" value={form.interestAId} onChange={(e) => change('interestAId', e.target.value)} placeholder="Select catalog result" data-testid="input-entity-a-id" /></Field>
-              <Field label="Entity ID · B" required><input className="field mono text-[10px]" value={form.interestBId} onChange={(e) => change('interestBId', e.target.value)} placeholder="Select catalog result" data-testid="input-entity-b-id" /></Field>
+              <Field label="Entity ID · A" required><input className="field mono text-[10px]" value={form.interestAId} readOnly placeholder="Select catalog result" data-testid="input-entity-a-id" /></Field>
+              <Field label="Entity ID · B" required><input className="field mono text-[10px]" value={form.interestBId} readOnly placeholder="Select catalog result" data-testid="input-entity-b-id" /></Field>
             </div>
             {search.isPending && <div className="rounded-lg border border-white/[.08] p-3 text-[10px] text-[#8d98ad]"><LoaderCircle className="mr-2 inline animate-spin" size={12} />Searching connected entity catalog…</div>}
-            {search.data && <div className="rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-3"><div className="mb-2 flex items-center justify-between text-[10px] text-[#a9e5ea]">Catalog results for “{entityText}”<button onClick={() => { setEntitySide(null); }} type="button" aria-label="Dismiss catalog results"><X size={13} /></button></div>{search.data.entities.length ? <div className="space-y-1">{search.data.entities.map((entity) => <button type="button" key={entity.id} onClick={() => { if (entitySide === 'a') { change('interestA', entity.name); change('interestAId', entity.id); } if (entitySide === 'b') { change('interestB', entity.name); change('interestBId', entity.id); } }} className="flex w-full justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]"><span className="text-[11px] text-[#d7dce8]">{entity.name}<span className="mt-0.5 block mono text-[8px] text-[#778398]">{entity.id}</span></span><span className="mono text-[9px] text-[#728095]">{entity.type ?? entity.subtype ?? entity.source}</span></button>)}</div> : <div className="text-[10px] text-[#818ca1]">No matching entities returned.</div>}</div>}
+            {search.data && entitySide && entityText === (entitySide === 'a' ? form.interestA : form.interestB) && <div className="rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-3"><div className="mb-2 flex items-center justify-between text-[10px] text-[#a9e5ea]">Catalog results for “{entityText}”<button onClick={() => { setEntitySide(null); }} type="button" aria-label="Dismiss catalog results"><X size={13} /></button></div>{search.data.entities.length ? <div className="space-y-1">{search.data.entities.map((entity) => <button type="button" key={entity.id} onClick={() => { if (entitySide === 'a') { change('interestA', entity.name); change('interestAId', entity.id); } if (entitySide === 'b') { change('interestB', entity.name); change('interestBId', entity.id); } setEntitySide(null); }} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]"><span className="flex w-full items-start justify-between gap-3"><span className="min-w-0 text-[11px] text-[#d7dce8]">{entity.name}<span className="mt-0.5 block mono text-[8px] text-[#778398]">{entity.id}</span></span><span className="shrink-0 text-right text-[9px] text-[#aab8ca]">{entity.type ?? 'Type unavailable'}{entity.subtype && <span className="block text-[8px] text-[#8d9bae]">Subtype: {entity.subtype}</span>}</span></span>{entity.description && <span className="line-clamp-2 pr-1 text-[9px] leading-4 text-[#8e9bb0]">{entity.description}</span>}</button>)}</div> : <div className="text-[10px] text-[#818ca1]">No matching entities returned.</div>}</div>}
             {search.isError && <div className="text-[10px] text-rose-200/80">Catalog search unavailable. Check the Qloo connection in settings.</div>}
             <Field label="City" required><div className="relative"><MapPin size={14} className="absolute left-3 top-3.5 text-[#707b92]" /><input className="field pl-9" maxLength={120} value={form.city} onChange={(e) => change('city', e.target.value)} placeholder="Where should this live?" data-testid="input-city" /></div></Field>
             <Field label="Activation type" required><div className="relative"><select className="field appearance-none pr-9" value={form.activationType} onChange={(e) => change('activationType', e.target.value)} data-testid="select-activation-type"><option value="pop-up">Pop-up</option><option value="live_event">Live event</option><option value="brand_collaboration">Brand collaboration</option><option value="retail_experience">Retail experience</option><option value="community_event">Community event</option></select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-3.5 text-[#758097]" /></div></Field>

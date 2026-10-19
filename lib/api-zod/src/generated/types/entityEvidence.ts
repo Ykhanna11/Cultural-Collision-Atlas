@@ -13,5 +13,7 @@ export interface EntityEvidence {
   type?: string | null;
   /** @nullable */
   subtype?: string | null;
+  /** @nullable */
+  description?: string | null;
   source: string;
 }
