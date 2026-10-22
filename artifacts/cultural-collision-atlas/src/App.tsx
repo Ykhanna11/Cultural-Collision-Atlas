@@ -385,7 +385,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
 }) {
   const candidates = response.candidates ?? [];
   return <div className="space-y-4 page-in">
-    <div className="surface rounded-2xl p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78859b]">Comparison result / {city} · {recommendationCategoryLabel(recommendationType)} recommendations</div><h2 className="mt-2 text-[18px] font-semibold tracking-[-.035em]">{interestA} <span className="text-[#9b89e8]">×</span> {interestB}</h2></div><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200/15 bg-cyan-100/[.04] px-2.5 py-1 text-[9px] text-[#9cdee3]"><span className="h-1.5 w-1.5 rounded-full bg-[#72dbe4]" />{response.source}</span></div><p className="mt-3 text-[11px] leading-5 text-[#8f9ab0]">{response.caveat}</p><div className="mt-3 border-t border-white/[.06] pt-3 text-[9px] text-[#727d93]">Generated {formatDate(response.generatedAt)} · Candidate count {candidates.length}</div></div>
+    <div className="surface rounded-2xl p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78859b]">Comparison result / {city} · {recommendationCategoryLabel(recommendationType)} recommendations</div><h2 className="mt-2 text-[18px] font-semibold tracking-[-.035em]">{interestA} <span className="text-[#9b89e8]">×</span> {interestB}</h2></div><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200/15 bg-cyan-100/[.04] px-2.5 py-1 text-[9px] text-[#9cdee3]"><span className="h-1.5 w-1.5 rounded-full bg-[#72dbe4]" />{response.source}</span></div><p className="mt-3 text-[11px] leading-5 text-[#8f9ab0]">{response.caveat}</p><div className="mt-3 border-t border-white/[.06] pt-3 text-[9px] text-[#727d93]">Generated {formatDate(response.generatedAt)} · Candidate count {candidates.length}</div>{recommendationType === 'urn:entity:place' && <p className="mt-3 text-[10px] leading-5 text-[#8f9ab0]">Exact selected-city ID matches are prioritized when available. Other Place results remain as fallbacks and are labeled outside the selected city or locality unavailable; they are not treated as local matches.</p>}</div>
     {!candidates.length ? <div className="surface rounded-2xl px-6 py-12 text-center"><div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/[.04] text-[#8995aa]"><Search size={18} /></div><h3 className="mt-4 text-[14px] font-semibold text-[#d1d5e1]">No {recommendationCategoryLabel(recommendationType).toLowerCase()} recommendations returned</h3><p className="mx-auto mt-1 max-w-[400px] text-[11px] leading-5 text-[#7e899f]">Qloo returned no candidates in this category for this comparison. Try another category or adjust the inputs; no sample results are substituted.</p></div> : candidates.map((candidate, index) => {
         const rawEvidence: unknown = candidate.evidence;
         const evidenceAvailable = Array.isArray(rawEvidence);
@@ -400,11 +400,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
       </div></div></div>
       {tasteEvidence.length > 0 && <div className="grid gap-3 border-t border-white/[.06] px-5 py-4 md:grid-cols-2">
         {tasteEvidence.map((item) => {
-          const status = item.value.startsWith('Exact matching tag IDs observed')
-            ? 'Exact tag overlap observed'
-            : item.value.startsWith('No exact tag-ID overlap observed')
-              ? 'No observed overlap'
-              : 'Evidence unavailable or incomplete';
+          const status = tasteEvidenceStatus(item.value);
           return <div key={item.label} className="rounded-xl border border-white/[.07] bg-white/[.018] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-[10px] font-semibold text-[#d2d7e4]">{item.label}</div>
@@ -432,7 +428,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
           </div>
           {recommendationType === 'urn:entity:place' && <div className="rounded-xl border border-white/[.07] bg-white/[.018] p-3">
             <div className="text-[10px] font-semibold text-[#d2d7e4]">Place locality evidence</div>
-            <p className="mt-2 text-[10px] leading-5 text-[#a3adbf]">{candidate.localityStatus === 'matches_selected_city' ? 'Matches selected city' : candidate.localityStatus === 'outside_selected_city' ? 'Outside selected city' : 'Location unavailable'}. This compares Qloo city entity IDs under a city-proper interpretation; it does not establish cultural relevance.</p>
+            <p className="mt-2 text-[10px] leading-5 text-[#a3adbf]">{candidate.localityStatus === 'matches_selected_city' ? 'Exact selected-city match' : candidate.localityStatus === 'outside_selected_city' ? 'Outside selected city' : 'Location unavailable; exact match not verified'}. This compares Qloo city entity IDs under a city-proper interpretation; it does not establish cultural relevance.</p>
             {typeof candidate.localityCityEntityId === 'string' && <p className="mono mt-2 break-all text-[8px] text-[#78849a]">Returned city entity ID · {candidate.localityCityEntityId}</p>}
           </div>}
         </div>
@@ -451,6 +447,17 @@ function isDisplayableEvidence(value: unknown): value is { label: string; value:
     'value' in value && typeof value.value === 'string' && value.value.trim().length > 0 &&
     'source' in value && typeof value.source === 'string' && value.source.trim().length > 0 &&
     'kind' in value && (value.kind === 'observed_api' || value.kind === 'external_data' || value.kind === 'derived' || value.kind === 'hypothesis');
+}
+
+function tasteEvidenceStatus(value: string): string {
+  const incomplete = value.includes('list may be partial');
+  if (value.startsWith('Cultural/domain tag overlap observed')) return incomplete ? 'Cultural/domain · incomplete' : 'Cultural/domain evidence';
+  if (value.startsWith('Generic operational attribute overlap observed')) return incomplete ? 'Operational · incomplete' : 'Generic operational attribute';
+  if (value.startsWith('Unclassified tag overlap observed')) return incomplete ? 'Unclassified · incomplete' : 'Unclassified tag evidence';
+  if (value.startsWith('Multiple tag categories observed')) return incomplete ? 'Multiple categories · incomplete' : 'Multiple tag categories';
+  if (value.startsWith('No exact tag-ID overlap observed')) return 'No observed overlap';
+  if (value.startsWith('Exact matching tag IDs observed')) return 'Exact tag overlap observed';
+  return 'Evidence unavailable or incomplete';
 }
 
 function EvidenceKind({ kind }: { kind: string }) {

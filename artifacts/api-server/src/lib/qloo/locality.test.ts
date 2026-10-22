@@ -129,6 +129,122 @@ test("Place ranking preserves the returned city entity ID and classification", (
   assert.equal(candidates[0]?.localityStatus, "matches_selected_city");
 });
 
+test("Place ranking prioritizes exact-city candidates and retains fallback results", () => {
+  const candidates = rankBridgeCandidates({
+    interestA: "Input A",
+    interestAId: "input-a",
+    interestB: "Input B",
+    interestBId: "input-b",
+    recommendationType: "urn:entity:place",
+    selectedCityEntityId: newYorkCityId,
+    resultsA: { results: { entities: [] } },
+    resultsB: { results: { entities: [] } },
+    jointResults: {
+      results: {
+        entities: [
+          {
+            entity_id: "outside-city",
+            name: "Outside city",
+            properties: {
+              locality: { city: { entity_id: miamiBeachCityId } },
+            },
+            query: {
+              affinity: 0.99,
+              explainability: {
+                "signal.interests.entities": [
+                  { entity_id: "input-a", score: 0.8 },
+                  { entity_id: "input-b", score: 0.7 },
+                ],
+              },
+            },
+          },
+          {
+            entity_id: "missing-city",
+            name: "Missing city",
+            properties: { locality: { city: {} } },
+            query: { affinity: 0.85 },
+          },
+          {
+            entity_id: "exact-city",
+            name: "Exact city",
+            properties: {
+              locality: { city: { entity_id: newYorkCityId } },
+            },
+            query: { affinity: 0.2 },
+          },
+        ],
+      },
+    },
+  });
+
+  assert.deepEqual(
+    candidates.map(({ id, localityStatus }) => ({ id, localityStatus })),
+    [
+      { id: "exact-city", localityStatus: "matches_selected_city" },
+      { id: "outside-city", localityStatus: "outside_selected_city" },
+      { id: "missing-city", localityStatus: "unavailable" },
+    ],
+  );
+  assert.equal(candidates.length, 3);
+});
+
+test("Brand and Destination ranking order remains independent of locality", () => {
+  const jointResults = {
+    results: {
+      entities: [
+        {
+          entity_id: "high-attribution",
+          name: "High attribution",
+          properties: {
+            locality: { city: { entity_id: miamiBeachCityId } },
+          },
+          query: {
+            affinity: 0.2,
+            explainability: {
+              "signal.interests.entities": [
+                { entity_id: "input-a", score: 0.8 },
+                { entity_id: "input-b", score: 0.7 },
+              ],
+            },
+          },
+        },
+        {
+          entity_id: "lower-attribution",
+          name: "Lower attribution",
+          properties: {
+            locality: { city: { entity_id: newYorkCityId } },
+          },
+          query: { affinity: 0.99 },
+        },
+      ],
+    },
+  };
+  for (const recommendationType of [
+    "urn:entity:brand",
+    "urn:entity:destination",
+  ] as const) {
+    const candidates = rankBridgeCandidates({
+      interestA: "Input A",
+      interestAId: "input-a",
+      interestB: "Input B",
+      interestBId: "input-b",
+      recommendationType,
+      selectedCityEntityId: newYorkCityId,
+      resultsA: { results: { entities: [] } },
+      resultsB: { results: { entities: [] } },
+      jointResults,
+    });
+
+    assert.deepEqual(
+      candidates.map(({ id }) => id),
+      ["high-attribution", "lower-attribution"],
+    );
+    assert.ok(
+      candidates.every(({ localityStatus }) => localityStatus === undefined),
+    );
+  }
+});
+
 test("missing or malformed locality IDs produce unavailable status", () => {
   assert.equal(
     localityStatusForCandidate("urn:entity:place", null, newYorkCityId),

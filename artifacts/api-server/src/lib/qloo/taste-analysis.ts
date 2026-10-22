@@ -5,13 +5,32 @@ import { requestTasteAnalysis } from "./insights";
 interface TasteTag {
   id: string;
   name: string;
+  subtype: string | null;
 }
+
+type TasteEvidenceCategory = "cultural_domain" | "operational" | "unclassified";
 
 interface ParsedTags {
   available: boolean;
   complete: boolean;
   tags: TasteTag[];
 }
+
+const CULTURAL_DOMAIN_SUBTYPES = new Set([
+  "urn:tag:genre:brand",
+  "urn:tag:genre:media",
+  "urn:tag:genre:music",
+  "urn:tag:industry:qloo",
+]);
+
+const OPERATIONAL_SUBTYPES = new Set([
+  "urn:tag:category:place",
+  "urn:tag:cost_description:place",
+  "urn:tag:credit_card:place",
+  "urn:tag:genre:place",
+  "urn:tag:hotel_rating:place",
+  "urn:tag:inclusivity:place",
+]);
 
 export interface TasteAnalysisRequestResult {
   payload: unknown | null;
@@ -55,12 +74,20 @@ function parseTasteTags(payload: unknown): ParsedTags {
     if (
       !isRecord(tag) ||
       typeof tag.tag_id !== "string" ||
-      typeof tag.name !== "string"
+      !tag.tag_id.trim() ||
+      typeof tag.name !== "string" ||
+      !tag.name.trim()
     ) {
       complete = false;
       return [];
     }
-    return [{ id: tag.tag_id, name: tag.name.trim() || tag.tag_id }];
+    return [
+      {
+        id: tag.tag_id,
+        name: tag.name,
+        subtype: typeof tag.subtype === "string" ? tag.subtype : null,
+      },
+    ];
   });
   return { available: true, complete, tags };
 }
@@ -75,14 +102,39 @@ function parseCandidateTags(value: unknown): ParsedTags {
     if (
       !isRecord(tag) ||
       typeof tag.id !== "string" ||
-      typeof tag.name !== "string"
+      !tag.id.trim() ||
+      typeof tag.name !== "string" ||
+      !tag.name.trim()
     ) {
       complete = false;
       return [];
     }
-    return [{ id: tag.id, name: tag.name.trim() || tag.id }];
+    return [
+      {
+        id: tag.id,
+        name: tag.name,
+        subtype: typeof tag.type === "string" ? tag.type : null,
+      },
+    ];
   });
   return { available: true, complete, tags };
+}
+
+function classifyTagOverlap(
+  tasteTag: TasteTag,
+  candidateTag: TasteTag,
+): TasteEvidenceCategory {
+  if (
+    !tasteTag.subtype ||
+    !candidateTag.subtype ||
+    tasteTag.subtype !== candidateTag.subtype
+  ) {
+    return "unclassified";
+  }
+  const subtype = tasteTag.subtype;
+  if (CULTURAL_DOMAIN_SUBTYPES.has(subtype)) return "cultural_domain";
+  if (OPERATIONAL_SUBTYPES.has(subtype)) return "operational";
+  return "unclassified";
 }
 
 function overlapEvidence(
@@ -91,22 +143,67 @@ function overlapEvidence(
   taste: ParsedTags,
   candidate: ParsedTags,
 ): EvidenceItem {
-  const candidateIds = new Set(candidate.tags.map(({ id }) => id));
-  const matches = taste.tags.filter(({ id }) => candidateIds.has(id));
+  const candidateTagsById = new Map(candidate.tags.map((tag) => [tag.id, tag]));
+  const matches = taste.tags.flatMap((tag) => {
+    const candidateTag = candidateTagsById.get(tag.id);
+    return candidateTag
+      ? [
+          {
+            ...tag,
+            category: classifyTagOverlap(tag, candidateTag),
+            candidateName: candidateTag.name,
+          },
+        ]
+      : [];
+  });
   const dataComplete = taste.complete && candidate.complete;
   let value: string;
 
   if (matches.length) {
-    value =
-      `Exact matching tag IDs observed for ${inputName}: ` +
-      matches.map(({ name, id }) => `${name} (${id})`).join(", ") +
-      (dataComplete
-        ? "."
-        : ". Additional tag data was incomplete, so this list may be partial.");
+    const categories: Array<{
+      category: TasteEvidenceCategory;
+      label: string;
+    }> = [
+      { category: "cultural_domain", label: "Cultural/domain evidence" },
+      { category: "operational", label: "Generic operational attributes" },
+      { category: "unclassified", label: "Unclassified tags" },
+    ];
+    const categorySummaries = categories.flatMap(({ category, label }) => {
+      const categoryTags = matches.filter((tag) => tag.category === category);
+      return categoryTags.length
+        ? [
+            `${label}: ${categoryTags
+              .map(
+                ({ name, candidateName, id }) =>
+                  `"${name}" / candidate tag "${candidateName}" (${id})`,
+              )
+              .join(", ")}.`,
+          ]
+        : [];
+    });
+    const observedCategories = new Set(matches.map(({ category }) => category));
+    const status =
+      observedCategories.size > 1
+        ? "Multiple tag categories observed."
+        : observedCategories.has("cultural_domain")
+          ? "Cultural/domain tag overlap observed."
+          : observedCategories.has("operational")
+            ? "Generic operational attribute overlap observed."
+            : "Unclassified tag overlap observed.";
+    value = [
+      status,
+      ...categorySummaries,
+      dataComplete
+        ? ""
+        : "Additional tag data was incomplete, so the list may be partial.",
+      "Exact tag overlap is not proof of a cultural relationship or shared audience.",
+    ]
+      .filter(Boolean)
+      .join(" ");
   } else if (taste.available && candidate.available && dataComplete) {
     value =
-      `No exact tag-ID overlap observed for ${inputName} in the returned ` +
-      "Taste Analysis and candidate tag lists. This is not evidence against a connection.";
+      `No exact tag-ID overlap observed for ${inputName} in the complete ` +
+      "returned Taste Analysis and candidate tag lists. This is not evidence against a connection.";
   } else {
     const unavailable = [
       ...(!taste.available || !taste.complete

@@ -290,6 +290,13 @@ export function rankBridgeCandidates(input: {
       attributionStrength: strength,
     }];
   }).sort((left, right) => {
+    if (input.recommendationType === "urn:entity:place") {
+      const leftMatchesCity = left.localityStatus === "matches_selected_city";
+      const rightMatchesCity = right.localityStatus === "matches_selected_city";
+      if (leftMatchesCity !== rightMatchesCity) {
+        return leftMatchesCity ? -1 : 1;
+      }
+    }
     const strengthOrder: Record<AttributionStrength, number> = {
       two_sided: 2,
       one_sided: 1,
