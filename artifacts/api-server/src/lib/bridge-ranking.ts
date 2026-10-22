@@ -1,4 +1,5 @@
 import { isRecord } from "./qloo/client";
+import type { QlooRecommendationType } from "./qloo/insights";
 
 interface RankedEntity {
   id: string;
@@ -73,6 +74,17 @@ function qlooSignals(item: RankedEntity): string[] {
   ];
 }
 
+function recommendationTypeLabel(type: QlooRecommendationType): string {
+  switch (type) {
+    case "urn:entity:place":
+      return "Places";
+    case "urn:entity:destination":
+      return "Destinations";
+    default:
+      return "Brands";
+  }
+}
+
 function readInputAttribution(
   value: unknown,
   inputEntities: Array<{ id: string; name: string }>,
@@ -135,6 +147,7 @@ export function rankBridgeCandidates(input: {
   interestAId: string;
   interestB: string;
   interestBId: string;
+  recommendationType: QlooRecommendationType;
   resultsA: unknown;
   resultsB: unknown;
   jointResults: unknown;
@@ -142,6 +155,7 @@ export function rankBridgeCandidates(input: {
   const interestA = readRankedEntities(input.resultsA);
   const interestB = readRankedEntities(input.resultsB);
   const joint = readRankedEntities(input.jointResults);
+  const categoryLabel = recommendationTypeLabel(input.recommendationType);
   const byIdB = new Map(interestB.map((entity) => [entity.id, entity]));
   const byIdA = new Map(interestA.map((entity) => [entity.id, entity]));
   const seen = new Set<string>();
@@ -183,8 +197,8 @@ export function rankBridgeCandidates(input: {
       evidence: [
         {
           source: "Qloo Insights API",
-          label: "Joint-interest comparison",
-          value: ["Entity returned for a request using both input interests.", ...qlooSignals(candidate)].join(" "),
+          label: `Joint-interest comparison · ${categoryLabel}`,
+          value: [`${categoryLabel} returned for a request using both input interests.`, ...qlooSignals(candidate)].join(" "),
           kind: "observed_api" as const,
         },
         ...independentMatches.flatMap(([interest, match]) =>

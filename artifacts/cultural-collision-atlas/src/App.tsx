@@ -15,7 +15,7 @@ import {
   useSearchQlooEntities, useTestQlooConnection,
 } from '@workspace/api-client-react';
 import type {
-  ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryResponse, QlooStatus,
+  ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, QlooStatus,
   SavedDiscovery,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
@@ -231,7 +231,12 @@ function EmptyInline({ title, description }: { title: string; description: strin
   return <div className="rounded-xl border border-dashed border-white/[.1] px-4 py-6 text-center"><div className="text-[12px] font-semibold text-[#adb5c7]">{title}</div><p className="mt-1 text-[10px] text-[#748096]">{description}</p></div>;
 }
 
-const defaultForm: DiscoveryInput = { interestA: '', interestB: '', interestAId: '', interestBId: '', city: '', activationType: 'pop-up', budgetRange: '', objective: '', audienceDescription: '' };
+const defaultForm: DiscoveryInput = { interestA: '', interestB: '', interestAId: '', interestBId: '', city: '', recommendationType: 'urn:entity:brand', activationType: 'pop-up', budgetRange: '', objective: '', audienceDescription: '' };
+const recommendationCategories: Array<{ value: DiscoveryInputRecommendationType; label: string }> = [
+  { value: 'urn:entity:brand', label: 'Brand' },
+  { value: 'urn:entity:place', label: 'Place' },
+  { value: 'urn:entity:destination', label: 'Destination' },
+];
 const entitySearchTypes = [
   { value: 'urn:entity:artist', label: 'Artist' },
   { value: 'urn:entity:book', label: 'Book' },
@@ -245,6 +250,10 @@ const entitySearchTypes = [
   { value: 'urn:entity:videogame', label: 'Video game' },
 ] as const;
 type EntitySearchType = typeof entitySearchTypes[number]['value'];
+
+function recommendationCategoryLabel(value: DiscoveryInputRecommendationType | undefined) {
+  return recommendationCategories.find((category) => category.value === value)?.label ?? 'Brand';
+}
 
 function DiscoveryPage() {
   const [, setLocation] = useLocation();
@@ -309,6 +318,7 @@ function DiscoveryPage() {
               <Button type="button" variant="quiet" className="px-0 text-[10px]" onClick={() => searchEntity('b')} disabled={!form.interestB.trim() || search.isPending}><Search size={12} />Search catalog B</Button>
             </div>
             <Field label="Optional catalog category"><select className="field" value={entitySearchType} onChange={(event) => { setEntitySearchType(event.target.value as EntitySearchType | ''); setEntitySide(null); }} data-testid="select-entity-search-type"><option value="">Any category</option>{entitySearchTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></Field>
+            <Field label="Recommendation category"><select className="field" value={form.recommendationType ?? 'urn:entity:brand'} disabled={discover.isPending} onChange={(event) => { const category = recommendationCategories.find(({ value }) => value === event.target.value); if (category) { change('recommendationType', category.value); setResponse(null); setSelected(null); discover.reset(); } }} data-testid="select-recommendation-category">{recommendationCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select></Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Entity ID · A" required><input className="field mono text-[10px]" value={form.interestAId} readOnly placeholder="Select catalog result" data-testid="input-entity-a-id" /></Field>
               <Field label="Entity ID · B" required><input className="field mono text-[10px]" value={form.interestBId} readOnly placeholder="Select catalog result" data-testid="input-entity-b-id" /></Field>
@@ -330,7 +340,7 @@ function DiscoveryPage() {
           {!response && !discover.isPending && !discover.isError && <div className="surface flex min-h-[475px] flex-col items-center justify-center rounded-2xl px-6 text-center"><div className="relative mb-6 flex h-[90px] w-[90px] items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.04]"><div className="absolute inset-3 rounded-full border border-cyan-200/10" /><Waypoints size={27} className="text-[#a890f2]" /><span className="absolute right-1 top-4 h-2 w-2 rounded-full bg-[#70dce7]" /></div><div className="eyebrow text-[9px] text-[#8b7cc0]">Ready for inquiry</div><h2 className="mt-3 text-[20px] font-semibold text-[#e4e5ef]">Your evidence panel is waiting</h2><p className="mt-2 max-w-[360px] text-[12px] leading-6 text-[#828da3]">Submit two interests and a planning context. Returned evidence will appear here with its source and confidence level.</p></div>}
           {discover.isPending && <div className="space-y-3"><Skeleton className="h-28" /><Skeleton className="h-48" /><Skeleton className="h-48" /></div>}
           {discover.isError && <ErrorNotice title="We couldn’t complete this comparison" onRetry={() => discover.mutate({ data: form }, { onSuccess: setResponse })} />}
-          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} selected={selected} onSelect={setSelected} onSave={saveResult} onPlan={makePlan} saving={save.isPending} savedMessage={savedMessage} />}
+          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={setSelected} onSave={saveResult} onPlan={makePlan} saving={save.isPending} savedMessage={savedMessage} />}
         </section>
       </div>
     </div>
@@ -341,15 +351,15 @@ function Field({ label, required, children }: { label: string; required?: boolea
   return <label className="block"><span className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-[#a8b0c1]">{label}{required && <span className="text-[#c69aff]">*</span>}</span>{children}</label>;
 }
 
-function Results({ response, city, interestA, interestB, selected, onSelect, onSave, onPlan, saving, savedMessage }: {
-  response: DiscoveryResponse; city: string; interestA: string; interestB: string; selected: BridgeCandidate | null;
+function Results({ response, city, interestA, interestB, recommendationType, selected, onSelect, onSave, onPlan, saving, savedMessage }: {
+  response: DiscoveryResponse; city: string; interestA: string; interestB: string; recommendationType: DiscoveryInputRecommendationType | undefined; selected: BridgeCandidate | null;
   onSelect: (candidate: BridgeCandidate | null) => void; onSave: (candidate: BridgeCandidate) => void;
   onPlan: (candidate: BridgeCandidate) => void; saving: boolean; savedMessage: string;
 }) {
   const candidates = response.candidates ?? [];
   return <div className="space-y-4 page-in">
-    <div className="surface rounded-2xl p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78859b]">Comparison result / {city}</div><h2 className="mt-2 text-[18px] font-semibold tracking-[-.035em]">{interestA} <span className="text-[#9b89e8]">×</span> {interestB}</h2></div><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200/15 bg-cyan-100/[.04] px-2.5 py-1 text-[9px] text-[#9cdee3]"><span className="h-1.5 w-1.5 rounded-full bg-[#72dbe4]" />{response.source}</span></div><p className="mt-3 text-[11px] leading-5 text-[#8f9ab0]">{response.caveat}</p><div className="mt-3 border-t border-white/[.06] pt-3 text-[9px] text-[#727d93]">Generated {formatDate(response.generatedAt)} · Candidate count {candidates.length}</div></div>
-    {!candidates.length ? <div className="surface rounded-2xl px-6 py-12 text-center"><div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/[.04] text-[#8995aa]"><Search size={18} /></div><h3 className="mt-4 text-[14px] font-semibold text-[#d1d5e1]">No bridge candidates returned</h3><p className="mx-auto mt-1 max-w-[400px] text-[11px] leading-5 text-[#7e899f]">The connected service returned no candidates for this comparison. Try adjusting interests or context; no sample results are substituted.</p></div> : candidates.map((candidate, index) => {
+    <div className="surface rounded-2xl p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78859b]">Comparison result / {city} · {recommendationCategoryLabel(recommendationType)} recommendations</div><h2 className="mt-2 text-[18px] font-semibold tracking-[-.035em]">{interestA} <span className="text-[#9b89e8]">×</span> {interestB}</h2></div><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200/15 bg-cyan-100/[.04] px-2.5 py-1 text-[9px] text-[#9cdee3]"><span className="h-1.5 w-1.5 rounded-full bg-[#72dbe4]" />{response.source}</span></div><p className="mt-3 text-[11px] leading-5 text-[#8f9ab0]">{response.caveat}</p><div className="mt-3 border-t border-white/[.06] pt-3 text-[9px] text-[#727d93]">Generated {formatDate(response.generatedAt)} · Candidate count {candidates.length}</div></div>
+    {!candidates.length ? <div className="surface rounded-2xl px-6 py-12 text-center"><div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/[.04] text-[#8995aa]"><Search size={18} /></div><h3 className="mt-4 text-[14px] font-semibold text-[#d1d5e1]">No {recommendationCategoryLabel(recommendationType).toLowerCase()} recommendations returned</h3><p className="mx-auto mt-1 max-w-[400px] text-[11px] leading-5 text-[#7e899f]">Qloo returned no candidates in this category for this comparison. Try another category or adjust the inputs; no sample results are substituted.</p></div> : candidates.map((candidate, index) => {
         const rawEvidence: unknown = candidate.evidence;
         const evidenceAvailable = Array.isArray(rawEvidence);
         const evidenceItems = evidenceAvailable ? rawEvidence.filter(isDisplayableEvidence) : [];

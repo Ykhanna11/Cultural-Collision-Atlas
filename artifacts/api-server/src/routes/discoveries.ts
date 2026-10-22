@@ -11,8 +11,10 @@ import { desc, eq } from "drizzle-orm";
 import { db, savedDiscoveriesTable } from "@workspace/db";
 import { rankBridgeCandidates } from "../lib/bridge-ranking";
 import {
+  DEFAULT_QLOO_RECOMMENDATION_TYPE,
   compareJointInterests,
   compareSingleInterest,
+  isQlooRecommendationType,
 } from "../lib/qloo/insights";
 import { isQlooConfigured } from "../lib/qloo/client";
 
@@ -22,6 +24,14 @@ router.post("/discoveries", async (req, res): Promise<void> => {
   const parsed = DiscoverCulturalBridgesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const recommendationType =
+    parsed.data.recommendationType ?? DEFAULT_QLOO_RECOMMENDATION_TYPE;
+  if (!isQlooRecommendationType(recommendationType)) {
+    res.status(400).json({
+      error: "Unsupported Qloo recommendation category.",
+    });
     return;
   }
   if (!isQlooConfigured()) {
@@ -36,9 +46,14 @@ router.post("/discoveries", async (req, res): Promise<void> => {
   const input = parsed.data;
   try {
     const [resultsA, resultsB, jointResults] = await Promise.all([
-      compareSingleInterest(input.interestAId, input.city),
-      compareSingleInterest(input.interestBId, input.city),
-      compareJointInterests(input.interestAId, input.interestBId, input.city),
+      compareSingleInterest(input.interestAId, input.city, recommendationType),
+      compareSingleInterest(input.interestBId, input.city, recommendationType),
+      compareJointInterests(
+        input.interestAId,
+        input.interestBId,
+        input.city,
+        recommendationType,
+      ),
     ]);
 
     const ranked = rankBridgeCandidates({
@@ -46,6 +61,7 @@ router.post("/discoveries", async (req, res): Promise<void> => {
       interestAId: input.interestAId,
       interestB: input.interestB,
       interestBId: input.interestBId,
+      recommendationType,
       resultsA,
       resultsB,
       jointResults,

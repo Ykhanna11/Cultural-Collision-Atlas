@@ -330,6 +330,9 @@ components:
         interestAId: { type: string, minLength: 1, maxLength: 160 }
         interestBId: { type: string, minLength: 1, maxLength: 160 }
         city: { type: string, minLength: 1, maxLength: 120 }
+        recommendationType:
+          type: string
+          enum: [urn:entity:brand, urn:entity:place, urn:entity:destination]
         activationType:
           type: string
           enum: [pop-up, live_event, brand_collaboration, retail_experience, community_event]

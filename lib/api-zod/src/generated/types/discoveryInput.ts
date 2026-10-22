@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { DiscoveryInputActivationType } from './discoveryInputActivationType';
+import type { DiscoveryInputRecommendationType } from './discoveryInputRecommendationType';
 
 export interface DiscoveryInput {
   /**
@@ -33,6 +34,7 @@ export interface DiscoveryInput {
      * @maxLength 120
      */
   city: string;
+  recommendationType?: DiscoveryInputRecommendationType;
   activationType: DiscoveryInputActivationType;
   /**
      * @minLength 1

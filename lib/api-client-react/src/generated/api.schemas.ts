@@ -90,6 +90,15 @@ export interface EntitySearchResponse {
   entities: EntityEvidence[];
 }
 
+export type DiscoveryInputRecommendationType = typeof DiscoveryInputRecommendationType[keyof typeof DiscoveryInputRecommendationType];
+
+
+export const DiscoveryInputRecommendationType = {
+  'urn:entity:brand': 'urn:entity:brand',
+  'urn:entity:place': 'urn:entity:place',
+  'urn:entity:destination': 'urn:entity:destination',
+} as const;
+
 export type DiscoveryInputActivationType = typeof DiscoveryInputActivationType[keyof typeof DiscoveryInputActivationType];
 
 
@@ -127,6 +136,7 @@ export interface DiscoveryInput {
      * @maxLength 120
      */
   city: string;
+  recommendationType?: DiscoveryInputRecommendationType;
   activationType: DiscoveryInputActivationType;
   /**
      * @minLength 1

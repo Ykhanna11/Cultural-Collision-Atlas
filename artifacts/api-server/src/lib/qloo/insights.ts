@@ -1,16 +1,34 @@
 import { qlooGet, type QlooApiError } from "./client";
 
+export const QLOO_RECOMMENDATION_TYPES = [
+  "urn:entity:brand",
+  "urn:entity:place",
+  "urn:entity:destination",
+] as const;
+
+export type QlooRecommendationType =
+  (typeof QLOO_RECOMMENDATION_TYPES)[number];
+
+export const DEFAULT_QLOO_RECOMMENDATION_TYPE: QlooRecommendationType =
+  "urn:entity:brand";
+
+export function isQlooRecommendationType(
+  value: unknown,
+): value is QlooRecommendationType {
+  return QLOO_RECOMMENDATION_TYPES.some((type) => type === value);
+}
+
 export interface QlooInsightRequest {
   entityIds: string[];
   city: string;
-  entityType?: string;
+  entityType?: QlooRecommendationType;
 }
 
 export async function requestRecommendations(
   input: QlooInsightRequest,
 ): Promise<unknown> {
   return qlooGet("/v2/insights/", {
-    "filter.type": input.entityType ?? "urn:entity:brand",
+    "filter.type": input.entityType ?? DEFAULT_QLOO_RECOMMENDATION_TYPE,
     "signal.interests.entities": input.entityIds,
     "signal.location.query": input.city,
     "feature.explainability": "true",
@@ -20,18 +38,21 @@ export async function requestRecommendations(
 export async function compareSingleInterest(
   entityId: string,
   city: string,
+  entityType?: QlooRecommendationType,
 ): Promise<unknown> {
-  return requestRecommendations({ entityIds: [entityId], city });
+  return requestRecommendations({ entityIds: [entityId], city, entityType });
 }
 
 export async function compareJointInterests(
   entityAId: string,
   entityBId: string,
   city: string,
+  entityType?: QlooRecommendationType,
 ): Promise<unknown> {
   return requestRecommendations({
     entityIds: [entityAId, entityBId],
     city,
+    entityType,
   });
 }
 

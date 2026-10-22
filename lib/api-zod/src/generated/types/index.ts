@@ -12,6 +12,7 @@ export * from './bridgeCandidate';
 export * from './bridgeCandidateConfidence';
 export * from './discoveryInput';
 export * from './discoveryInputActivationType';
+export * from './discoveryInputRecommendationType';
 export * from './discoveryResponse';
 export * from './discoveryResponseSource';
 export * from './entityEvidence';

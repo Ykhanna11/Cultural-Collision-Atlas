@@ -119,6 +119,7 @@ export const DiscoverCulturalBridgesBody = zod.object({
   "interestAId": zod.string().min(1).max(discoverCulturalBridgesBodyInterestAIdMax),
   "interestBId": zod.string().min(1).max(discoverCulturalBridgesBodyInterestBIdMax),
   "city": zod.string().min(1).max(discoverCulturalBridgesBodyCityMax),
+  "recommendationType": zod.enum(['urn:entity:brand', 'urn:entity:place', 'urn:entity:destination']).optional(),
   "activationType": zod.enum(['pop-up', 'live_event', 'brand_collaboration', 'retail_experience', 'community_event']),
   "budgetRange": zod.string().min(1).max(discoverCulturalBridgesBodyBudgetRangeMax),
   "objective": zod.string().min(1).max(discoverCulturalBridgesBodyObjectiveMax),
