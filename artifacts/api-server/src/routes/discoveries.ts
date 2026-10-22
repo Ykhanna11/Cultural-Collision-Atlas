@@ -15,8 +15,10 @@ import {
   compareJointInterests,
   compareSingleInterest,
   isQlooRecommendationType,
+  requestTasteAnalysis,
 } from "../lib/qloo/insights";
 import { isQlooConfigured } from "../lib/qloo/client";
+import { loadTasteAnalysis } from "../lib/qloo/taste-analysis";
 import {
   isQlooEntityId,
   isVerifiedQlooCityLocality,
@@ -61,7 +63,7 @@ router.post("/discoveries", async (req, res): Promise<void> => {
       }
     }
 
-    const [resultsA, resultsB, jointResults] = await Promise.all([
+    const [resultsA, resultsB, jointResults, tasteResults] = await Promise.all([
       compareSingleInterest(
         input.interestAId,
         input.city,
@@ -81,7 +83,27 @@ router.post("/discoveries", async (req, res): Promise<void> => {
         recommendationType,
         input.cityEntityId,
       ),
+      loadTasteAnalysis(
+        [input.interestAId, input.interestBId],
+        requestTasteAnalysis,
+      ),
     ]);
+    for (const [index, result] of tasteResults.entries()) {
+      if ("error" in result) {
+        req.log.warn(
+          {
+            interest: index === 0 ? "A" : "B",
+            status:
+              typeof result.error === "object" &&
+              result.error !== null &&
+              "status" in result.error
+                ? result.error.status
+                : undefined,
+          },
+          "Optional Qloo Taste Analysis request failed",
+        );
+      }
+    }
 
     const ranked = rankBridgeCandidates({
       interestA: input.interestA,
@@ -90,6 +112,10 @@ router.post("/discoveries", async (req, res): Promise<void> => {
       interestBId: input.interestBId,
       recommendationType,
       selectedCityEntityId: input.cityEntityId,
+      tasteAnalysis: {
+        interestA: tasteResults[0]?.payload,
+        interestB: tasteResults[1]?.payload,
+      },
       resultsA,
       resultsB,
       jointResults,
@@ -103,6 +129,7 @@ router.post("/discoveries", async (req, res): Promise<void> => {
         candidates: ranked,
         caveat:
           "Qloo's joint-interest results and any matching single-interest results are aggregate recommendation evidence. Candidate confidence indicates whether per-result explainability explicitly returned positive contributions from both selected entities, one, or neither; Qloo may omit lower-impact contributions. This does not prove that the same individuals share both interests or predict activation success. The score is derived only from returned Qloo affinity or affinity rank, not input attribution or probability." +
+          " Taste Analysis overlap is supplementary exact-tag evidence, not entity-level input attribution; unavailable or incomplete tags are not treated as negative matches." +
           (recommendationType === "urn:entity:place"
             ? input.cityEntityId
               ? " Place locality status compares the returned city entity ID with the selected Qloo city ID using a city-proper interpretation; it is geographic evidence, not cultural relevance evidence."

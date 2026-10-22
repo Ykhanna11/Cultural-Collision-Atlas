@@ -32,6 +32,7 @@ The key is read only by the API server and is never sent to the browser. The con
 Official references used for the current request shape:
 
 - [Qloo API overview](https://docs.qloo.com/reference/api-overview)
+- [Insights API Deep Dive](https://docs.qloo.com/reference/insights-api-deep-dive)
 - [Basic Insights use case](https://docs.qloo.com/reference/basic-insights-use-case)
 - [Search Entities](https://docs.qloo.com/reference/get-search)
 - [Heatmaps use case](https://docs.qloo.com/reference/heatmaps-use-case)
@@ -40,6 +41,7 @@ Official references used for the current request shape:
 
 - Saved discoveries and activation plans persist in the project's PostgreSQL database.
 - No venue provider is configured. The Opportunity Atlas will not invent venue names, addresses, capacities, ratings, or map points.
-- Qloo's public overview mentions tag search, but its current reference did not provide a verifiable request path and response schema; tag lookup is therefore disabled rather than guessed.
+- Discovery optionally requests Qloo Taste Analysis tags for each input with `filter.type=urn:tag`. Exact tag-ID overlap with the returned candidate `tags` list is displayed separately for each input as supplementary derived evidence; it does not affect ranking or confidence. Missing, malformed, or unavailable tags are not treated as negative matches.
+- The dedicated tag-search integration remains disabled; it is separate from Insights API Taste Analysis.
 - Bridge scores are derived rankings, not probabilities. Aggregate cultural affinity does not prove that the same people share two interests or guarantee campaign success.
 - Planning content is labeled as hypotheses where it has not been validated. Budget estimates are withheld until sourced quotes exist.

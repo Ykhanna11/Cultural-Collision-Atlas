@@ -38,6 +38,14 @@ export async function requestRecommendations(
   });
 }
 
+export async function requestTasteAnalysis(entityId: string): Promise<unknown> {
+  return qlooGet("/v2/insights/", {
+    "filter.type": "urn:tag",
+    "signal.interests.entities": [entityId],
+    take: "20",
+  });
+}
+
 export async function compareSingleInterest(
   entityId: string,
   city: string,

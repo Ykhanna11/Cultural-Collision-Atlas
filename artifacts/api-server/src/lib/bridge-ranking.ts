@@ -1,6 +1,7 @@
 import { isRecord } from "./qloo/client";
 import { isQlooEntityId } from "./qloo/entities";
 import type { QlooRecommendationType } from "./qloo/insights";
+import { buildTasteAnalysisEvidence } from "./qloo/taste-analysis";
 
 interface RankedEntity {
   id: string;
@@ -9,6 +10,7 @@ interface RankedEntity {
   affinityRank: number | null;
   explainability: unknown;
   localityCityEntityId: string | null;
+  tags: unknown;
 }
 
 interface InputAttribution {
@@ -53,6 +55,7 @@ function readRankedEntities(value: unknown): RankedEntity[] {
           ? affinityRank
           : null,
       explainability: query?.explainability ?? null,
+      tags: entity.tags,
       localityCityEntityId:
         isRecord(entity.properties) &&
         isRecord(entity.properties.locality) &&
@@ -180,6 +183,10 @@ export function rankBridgeCandidates(input: {
   interestBId: string;
   recommendationType: QlooRecommendationType;
   selectedCityEntityId?: string;
+  tasteAnalysis?: {
+    interestA: unknown;
+    interestB: unknown;
+  };
   resultsA: unknown;
   resultsB: unknown;
   jointResults: unknown;
@@ -270,6 +277,15 @@ export function rankBridgeCandidates(input: {
             "Derived only from Qloo affinity or affinity rank when returned; zero when neither is available. This is not an individual-level confidence or a probability.",
           kind: "derived" as const,
         },
+        ...(input.tasteAnalysis
+          ? buildTasteAnalysisEvidence({
+              candidateTags: candidate.tags,
+              interestA: input.interestA,
+              tasteAnalysisA: input.tasteAnalysis.interestA,
+              interestB: input.interestB,
+              tasteAnalysisB: input.tasteAnalysis.interestB,
+            })
+          : []),
       ],
       attributionStrength: strength,
     }];

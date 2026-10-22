@@ -392,11 +392,28 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
         const evidenceItems = evidenceAvailable ? rawEvidence.filter(isDisplayableEvidence) : [];
         const evidenceComplete = evidenceAvailable && rawEvidence.every(isDisplayableEvidence);
         const attributionEvidence = evidenceItems.find((item) => item.label === 'Per-result input attribution');
+        const tasteEvidence = evidenceItems.filter((item) => item.label.startsWith('Taste Analysis overlap ·'));
         const displayedConfidence = evidenceComplete && attributionEvidence ? candidate.confidence : 'low';
         return <article key={candidate.id} className={cx('surface overflow-hidden rounded-2xl transition', selected?.id === candidate.id && 'border-violet-200/30')} data-testid={`card-bridge-${candidate.id}`}>
       <div className="p-5"><div className="flex items-start gap-4"><div className="mono flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200/15 bg-violet-200/[.05] text-[10px] text-[#b7a5f2]">{String(index + 1).padStart(2, '0')}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-[16px] font-semibold tracking-[-.02em] text-[#e5e5ef]">{candidate.name}</h3><p className="mt-1.5 max-w-[620px] text-[11px] leading-5 text-[#8f9ab0]">{candidate.explanation}</p></div><div className="text-right"><div className="mono text-[22px] font-medium tracking-[-.06em] text-[#b5a2f4]">{candidate.score}<span className="text-[10px] text-[#778198]">/100</span></div><div className="text-[8px] uppercase tracking-[.13em] text-[#778197]">Derived score</div></div></div>
         <div className="mt-4 flex flex-wrap items-center gap-2"><span className={cx('rounded-full border px-2 py-1 text-[9px] tracking-[.04em]', displayedConfidence === 'high' ? 'border-emerald-200/20 bg-emerald-100/[.04] text-emerald-100/80' : displayedConfidence === 'medium' ? 'border-amber-200/20 bg-amber-100/[.04] text-amber-100/80' : 'border-white/10 text-[#a0a8b8]')}>{displayedConfidence === 'high' ? 'Both inputs attributed' : displayedConfidence === 'medium' ? 'One input attributed' : 'Input attribution unavailable'}</span><span className="rounded-full border border-violet-200/15 px-2 py-1 text-[9px] text-[#a99ae1]">{evidenceItems.length} evidence items</span><button onClick={() => onSelect(selected?.id === candidate.id ? null : candidate)} className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-semibold text-[#a9b4c9] hover:text-white" data-testid={`button-evidence-${candidate.id}`}>{selected?.id === candidate.id ? 'Hide evidence' : 'Inspect evidence'}<ChevronDown size={13} className={cx('transition-transform', selected?.id === candidate.id && 'rotate-180')} /></button></div>
       </div></div></div>
+      {tasteEvidence.length > 0 && <div className="grid gap-3 border-t border-white/[.06] px-5 py-4 md:grid-cols-2">
+        {tasteEvidence.map((item) => {
+          const status = item.value.startsWith('Exact matching tag IDs observed')
+            ? 'Exact tag overlap observed'
+            : item.value.startsWith('No exact tag-ID overlap observed')
+              ? 'No observed overlap'
+              : 'Evidence unavailable or incomplete';
+          return <div key={item.label} className="rounded-xl border border-white/[.07] bg-white/[.018] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold text-[#d2d7e4]">{item.label}</div>
+              <span className="rounded-full border border-violet-200/15 px-2 py-1 text-[8px] text-[#b8a6ee]">{status}</span>
+            </div>
+            <p className="mt-2 text-[10px] leading-5 text-[#a3adbf]">{item.value}</p>
+          </div>;
+        })}
+      </div>}
       <div className="grid gap-3 border-t border-white/[.06] px-5 py-4 md:grid-cols-2">
         <div className="rounded-xl border border-white/[.07] bg-white/[.018] p-3">
           <div className="text-[10px] font-semibold text-[#d2d7e4]">Qloo input attribution</div>
