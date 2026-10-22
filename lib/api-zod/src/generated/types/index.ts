@@ -8,6 +8,8 @@
 
 export * from './activationPlan';
 export * from './atlasOverview';
+export * from './authSession';
+export * from './authSessionUser';
 export * from './bridgeCandidate';
 export * from './bridgeCandidateConfidence';
 export * from './bridgeCandidateLocalityStatus';

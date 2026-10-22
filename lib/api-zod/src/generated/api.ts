@@ -18,6 +18,36 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Read the current session and CSRF token
+ */
+export const GetAuthSessionResponse = zod.object({
+  "authenticated": zod.boolean(),
+  "user": zod.union([zod.object({
+  "email": zod.string().email()
+}),zod.null()]),
+  "csrfToken": zod.string()
+})
+
+
+/**
+ * @summary Begin Google OIDC sign-in
+ */
+export const StartLoginResponse = zod.void()
+
+
+/**
+ * @summary Complete Google OIDC sign-in
+ */
+export const CompleteLoginResponse = zod.void()
+
+
+/**
+ * @summary Destroy the current server-side session
+ */
+export const LogoutResponse = zod.void()
+
+
+/**
  * @summary Get workspace overview
  */
 export const GetAtlasOverviewResponse = zod.object({

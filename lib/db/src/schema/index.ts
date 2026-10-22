@@ -1,3 +1,4 @@
+export * from "./identity";
 export * from "./activation-plans";
 export * from "./saved-discoveries";
 

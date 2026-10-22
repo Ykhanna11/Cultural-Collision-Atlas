@@ -8,6 +8,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: auth
+    description: Authentication and session operations
   - name: health
     description: Health operations
   - name: atlas
@@ -18,9 +20,12 @@ tags:
     description: Activation plans
   - name: opportunities
     description: Geographic opportunity data
+security:
+  - sessionCookie: []
 paths:
   /healthz:
     get:
+      security: []
       operationId: healthCheck
       tags: [health]
       summary: Health check
@@ -32,6 +37,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      security: []
+      summary: Read the current session and CSRF token
+      responses:
+        "200":
+          description: Session status; an unauthenticated request receives a CSRF token for the login session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /auth/login:
+    get:
+      operationId: startLogin
+      tags: [auth]
+      security: []
+      summary: Begin Google OIDC sign-in
+      responses:
+        "302":
+          description: Redirect to the OIDC provider
+  /auth/callback:
+    get:
+      operationId: completeLogin
+      tags: [auth]
+      security: []
+      summary: Complete Google OIDC sign-in
+      responses:
+        "302":
+          description: Redirect to the application after validating OIDC state, nonce, PKCE, and account allowlist
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Destroy the current server-side session
+      responses:
+        "204":
+          description: Session destroyed
+        "401":
+          description: Authentication required
+        "403":
+          description: CSRF validation failed
   /atlas/overview:
     get:
       operationId: getAtlasOverview
@@ -254,7 +302,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-cca.sid
+      description: Production cookie; local development uses cca.sid without the __Host- prefix.
   schemas:
+    AuthSession:
+      type: object
+      properties:
+        authenticated: { type: boolean }
+        user:
+          oneOf:
+            - type: object
+              properties:
+                email: { type: string, format: email }
+              required: [email]
+            - type: "null"
+        csrfToken: { type: string }
+      required: [authenticated, user, csrfToken]
     HealthStatus:
       type: object
       properties:

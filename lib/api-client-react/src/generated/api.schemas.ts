@@ -5,6 +5,16 @@
  * Cultural Collision Atlas API
  * OpenAPI spec version: 0.2.0
  */
+export type AuthSessionUser = {
+  email: string;
+} | null;
+
+export interface AuthSession {
+  authenticated: boolean;
+  user: AuthSessionUser;
+  csrfToken: string;
+}
+
 export interface HealthStatus {
   status: string;
 }

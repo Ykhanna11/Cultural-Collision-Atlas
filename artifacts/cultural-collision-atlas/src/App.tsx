@@ -1,8 +1,8 @@
-import { type FormEvent, type ReactNode, useMemo, useReducer, useRef, useState } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
-  CircleHelp, Compass, Download, ExternalLink, FileText, Globe2, Layers3, LoaderCircle,
+  CircleHelp, Compass, Download, ExternalLink, FileText, Globe2, Layers3, LoaderCircle, LogOut,
   Map, MapPin, Menu, Network, PanelLeftClose, PanelLeftOpen, Plus, Radar, RefreshCw, Search, Settings2, ShieldCheck,
   Sparkles, Trash2, Waypoints, X,
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   useGetAtlasOverview, useGetOpportunityHeatmap, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
   useSearchQlooEntities, useTestQlooConnection,
+  setCsrfToken,
 } from '@workspace/api-client-react';
 import type {
   ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
@@ -29,9 +30,33 @@ import {
   mutationFeedbackReducer,
   type MutationFeedback,
 } from '@/lib/mutation-feedback';
+import { describeHeatmapPoint } from '@/lib/heatmap-display';
+import { getSavedPlanDetails } from '@/lib/saved-plan-details';
+import {
+  buildActivationPlanContent,
+  buildActivationPlanSaveInput,
+  buildDiscoverySaveInput,
+  getSavedDiscoveryDetails,
+  type ActivationPlanDraft,
+} from '@/lib/product-workflow';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
+const authSessionQueryKey = ['auth', 'session'];
+type AuthSession = {
+  authenticated: boolean;
+  user: { email: string } | null;
+  csrfToken: string;
+};
+
+async function fetchAuthSession(): Promise<AuthSession> {
+  const response = await fetch('/api/auth/session', { credentials: 'same-origin' });
+  if (!response.ok) throw new Error('Authentication status is unavailable.');
+  const session = await response.json() as AuthSession;
+  setCsrfToken(session.csrfToken);
+  return session;
+}
+
 const navItems = [
   { href: '/', label: 'Overview', icon: Layers3 },
   { href: '/discover', label: 'Discovery studio', icon: Compass },
@@ -109,9 +134,30 @@ function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [logoutError, setLogoutError] = useState(false);
+  const authSession = useQuery<AuthSession>({ queryKey: authSessionQueryKey, queryFn: fetchAuthSession });
+  const authQueryClient = useQueryClient();
   const overview = useGetAtlasOverview();
   const status = useGetQlooStatus();
   const current = navItems.find((item) => item.href === location) ?? navItems[0];
+  const logout = async () => {
+    setLogoutError(false);
+    try {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'x-csrf-token': authSession.data?.csrfToken ?? '' },
+      });
+      if (!response.ok) {
+        setLogoutError(true);
+        return;
+      }
+      setCsrfToken(null);
+      window.dispatchEvent(new Event('auth:session-ended'));
+    } catch {
+      setLogoutError(true);
+    }
+  };
   return (
     <div className="min-h-[100dvh]">
       <aside className={cx('fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-white/[.07] bg-[#111522]/95 py-5 backdrop-blur-xl transition-[width] duration-200 lg:flex', sidebarCollapsed ? 'w-[76px] px-2.5' : 'w-[246px] px-4')}>
@@ -161,9 +207,12 @@ function Shell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex items-center gap-3">
               <div className="hidden sm:block"><StatusPill status={status.data} /></div>
+              <span className="hidden max-w-48 truncate text-[10px] text-[#8792a8] md:block">{authSession.data?.user?.email}</span>
+              <Button variant="quiet" className="h-8 px-2" onClick={() => void logout()} aria-label="Sign out"><LogOut size={14} /></Button>
               <Link href="/settings" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.08] text-[10px] font-bold text-[#c8baff]" aria-label="Workspace settings" data-testid="link-settings-avatar">CC</Link>
             </div>
           </div>
+          {logoutError && <div role="alert" className="px-4 pb-2 text-right text-[10px] text-rose-200">Could not sign out. Please retry.</div>}
           {mobileMenu && <nav className="grid grid-cols-2 gap-1 border-t border-white/[.06] p-3 lg:hidden">{navItems.map((item) => { const Icon = item.icon; return <Link key={item.href} href={item.href} onClick={() => setMobileMenu(false)} className={cx('flex items-center gap-2 rounded-lg px-3 py-2.5 text-[11px]', location === item.href ? 'bg-violet-300/10 text-violet-100' : 'text-[#a3acc0]')}><Icon size={14} />{item.label}</Link>; })}</nav>}
         </header>
         <main className="mx-auto max-w-[1600px] px-4 pb-16 pt-7 sm:px-7 sm:pt-9 lg:px-10">{children}</main>
@@ -359,9 +408,8 @@ function DiscoveryPage() {
   };
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
-    const title = `${form.interestA} × ${form.interestB}`;
     dispatchSaveFeedback({ type: 'clear' });
-    save.mutate({ data: { title, city: form.city, interestA: form.interestA, interestB: form.interestB, result: { source: response.source, generatedAt: response.generatedAt, caveat: response.caveat, selectedBridge: candidate } } }, {
+    save.mutate({ data: buildDiscoverySaveInput(form, response, candidate) }, {
       onSuccess: () => { dispatchSaveFeedback({ type: 'success', message: 'Discovery saved to your evidence trail.' }); qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); },
       onError: () => dispatchSaveFeedback({ type: 'error', message: 'Discovery could not be saved. Please try again.' }),
     });
@@ -545,8 +593,8 @@ function AtlasPage() {
     {!status.isLoading && !status.data?.configured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-white/[.09] bg-white/[.02] p-4"><Globe2 size={16} className="mt-0.5 shrink-0 text-[#858fa4]" /><div><div className="text-[12px] font-semibold text-[#bdc4d2]">Heatmap source unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">Qloo is not configured for this workspace. Geographic signal requests are disabled until an administrator configures the source.</p></div></div>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <Panel className="min-h-[490px]">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78849a]">Spatial evidence</div><h2 className="mt-1 text-[16px] font-semibold">Affinity field</h2></div><span className="rounded-full border border-white/[.1] px-2 py-1 text-[9px] text-[#8c97aa]">Source dependent</span></div>
-        {heatmap.isPending ? <div className="grid h-[350px] place-items-center rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="text-center text-[11px] text-[#93a0b5]"><LoaderCircle size={18} className="mx-auto mb-3 animate-spin text-[#8fe2e8]" />Requesting geographic evidence…</div></div> : heatmap.isError ? <ErrorNotice title="Geographic evidence unavailable" /> : !heatmap.data ? <div className="relative grid h-[350px] place-items-center overflow-hidden rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="absolute inset-0 opacity-35" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px,transparent 1px)', backgroundSize: '42px 42px' }} /><div className="relative max-w-[350px] px-5 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-cyan-100/10 bg-cyan-100/[.04] text-[#72dbe4]"><Globe2 size={20} /></div><h3 className="mt-4 text-[14px] font-semibold">No location data loaded</h3><p className="mt-2 text-[11px] leading-5 text-[#7f8ba0]">Add a city and an entity ID from a connected catalog search to request an evidence-backed heatmap.</p></div></div> : !points.length ? <div className="grid h-[350px] place-items-center rounded-xl border border-dashed border-white/[.1] bg-[#0b101b] px-6 text-center"><div><Map size={22} className="mx-auto text-[#718097]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cad8]">No geographic points returned</h3><p className="mt-1 text-[10px] text-[#788499]">The source returned an empty heatmap for this entity and city.</p></div></div> : <div className="relative h-[350px] overflow-hidden rounded-xl border border-cyan-100/[.12] bg-[#0b101b]"><div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px,transparent 1px)', backgroundSize: '42px 42px' }} /><div className="absolute left-4 top-4 rounded-lg border border-white/[.08] bg-[#111827]/90 px-3 py-2 text-[9px] text-[#9eabc0]">API coordinate field · {points.length} points</div>{bounds && points.map((point, i) => { const x = bounds.maxLon === bounds.minLon ? 50 : 8 + ((point.longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 84; const y = bounds.maxLat === bounds.minLat ? 50 : 8 + ((bounds.maxLat - point.latitude) / (bounds.maxLat - bounds.minLat)) * 84; const weight = point.affinity ?? point.popularity ?? 0.5; return <div key={`${point.latitude}-${point.longitude}-${i}`} title={`Lat ${point.latitude}, lon ${point.longitude}${point.affinity != null ? ` · affinity ${point.affinity}` : ''}`} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/35 bg-cyan-300/30" style={{ left: `${x}%`, top: `${y}%`, width: `${8 + Math.min(18, Math.max(0, weight * 16))}px`, height: `${8 + Math.min(18, Math.max(0, weight * 16))}px` }} />; })}<div className="absolute bottom-3 right-3 text-[8px] text-[#717c90]">Points plotted by returned latitude / longitude · no basemap</div></div>}
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78849a]">Spatial evidence</div><h2 className="mt-1 text-[16px] font-semibold">Returned coordinate field</h2></div><span className="rounded-full border border-white/[.1] px-2 py-1 text-[9px] text-[#8c97aa]">Source dependent</span></div>
+        {heatmap.isPending ? <div className="grid h-[350px] place-items-center rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="text-center text-[11px] text-[#93a0b5]"><LoaderCircle size={18} className="mx-auto mb-3 animate-spin text-[#8fe2e8]" />Requesting geographic evidence…</div></div> : heatmap.isError ? <ErrorNotice title="Geographic evidence unavailable" /> : !heatmap.data ? <div className="relative grid h-[350px] place-items-center overflow-hidden rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="absolute inset-0 opacity-35" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px,transparent 1px)', backgroundSize: '42px 42px' }} /><div className="relative max-w-[350px] px-5 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-cyan-100/10 bg-cyan-100/[.04] text-[#72dbe4]"><Globe2 size={20} /></div><h3 className="mt-4 text-[14px] font-semibold">No location data loaded</h3><p className="mt-2 text-[11px] leading-5 text-[#7f8ba0]">Add a city and an entity ID from a connected catalog search to request an evidence-backed heatmap.</p></div></div> : !points.length ? <div className="grid h-[350px] place-items-center rounded-xl border border-dashed border-white/[.1] bg-[#0b101b] px-6 text-center"><div><Map size={22} className="mx-auto text-[#718097]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">No geographic points returned</h3><p className="mt-1 text-[10px] text-[#788499]">The source returned an empty heatmap for this entity and city.</p></div></div> : <div><div className="relative h-[350px] overflow-hidden rounded-xl border border-cyan-100/[.12] bg-[#0b101b]"><div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px, transparent 1px)', backgroundSize: '42px 42px' }} /><div className="absolute left-4 top-4 rounded-lg border border-white/[.08] bg-[#111827]/90 px-3 py-2 text-[9px] text-[#9eabc0]">Qloo coordinates · {points.length} points</div>{bounds && points.map((point, i) => { const x = bounds.maxLon === bounds.minLon ? 50 : 8 + ((point.longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 84; const y = bounds.maxLat === bounds.minLat ? 50 : 8 + ((bounds.maxLat - point.latitude) / (bounds.maxLat - bounds.minLat)) * 84; const display = describeHeatmapPoint(point, i); return <div key={`${point.latitude}-${point.longitude}-${i}`} title={`${display.label} · ${display.coordinates}`} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/35 bg-cyan-300/30" style={{ left: `${x}%`, top: `${y}%`, width: `${display.markerSize}px`, height: `${display.markerSize}px` }} />; })}<div className="absolute bottom-3 right-3 text-[8px] text-[#717c90]">Returned coordinates · schematic positions · no geographic basemap</div></div><div className="mt-3 rounded-xl border border-white/[.07] bg-white/[.018] p-3"><div className="flex flex-wrap gap-x-4 gap-y-2 text-[9px] text-[#aab4c6]"><span className="flex items-center gap-2"><span className="h-[10px] w-[10px] rounded-full border border-cyan-100/35 bg-cyan-300/30" />Uniform marker · one returned point</span><span>Position · relative to returned coordinate bounds, not a basemap</span><span>Size · fixed; does not represent affinity or popularity</span></div><div className="mt-2 text-[9px] leading-4 text-[#8792a6]">Returned metrics per point (not used for marker size):</div><div className="mt-2 max-h-36 space-y-1 overflow-auto">{points.map((point, i) => { const display = describeHeatmapPoint(point, i); return <div key={`${point.latitude}-${point.longitude}-${i}`} className="grid gap-1 border-t border-white/[.05] pt-1 text-[9px] text-[#929db2] sm:grid-cols-[70px_1fr_1fr_1fr_1fr]"><span>{display.label}</span><span>Coordinates: {display.coordinates}</span><span>Affinity: {display.affinity}</span><span>Rank: {display.affinityRank}</span><span>Popularity: {display.popularity}</span></div>; })}</div></div></div>}
         {heatmap.data && <div className="mt-3 flex flex-wrap gap-4 text-[9px] text-[#7e8a9f]"><span>Response source: <b className="font-medium text-[#b6c0d2]">{heatmap.data.source}</b></span><span>Points: <b className="font-medium text-[#b6c0d2]">{points.length}</b></span></div>}
       </Panel>
       <div className="space-y-5">
@@ -592,36 +640,22 @@ function PlansPage() {
   const savePlan = useSaveActivationPlan();
   const deletePlan = useDeleteActivationPlan();
   const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
-  const [draft, setDraft] = useState<{ form: DiscoveryInput; candidate: BridgeCandidate; response: DiscoveryResponse } | null>(() => {
+  const [draft, setDraft] = useState<ActivationPlanDraft | null>(() => {
     try { const raw = sessionStorage.getItem('atlas:draft-plan'); return raw ? JSON.parse(raw) : null; } catch { return null; }
   });
   const [title, setTitle] = useState('');
   const [exported, setExported] = useState(false);
   const [saveError, setSaveError] = useState(false);
-  const planContent = useMemo(() => draft ? ({
-    sections: [
-      { title: 'Strategic rationale', content: `Observed bridge candidate: ${draft.candidate.name}. Hypothesis: it may provide a relevant meeting point between ${draft.form.interestA} and ${draft.form.interestB}. The aggregate affinity evidence does not establish that the same individuals share both interests.` },
-      { title: 'Audience hypothesis', content: draft.form.audienceDescription?.trim() || `Hypothesis to validate: some people in ${draft.form.city} interested in ${draft.form.interestA} may also respond to an experience involving ${draft.form.interestB}. The audience has not been identified or measured.` },
-      { title: 'Recommended experience', content: `Working concept for a ${draft.form.activationType.replaceAll('_', ' ')} in ${draft.form.city}: prototype a participatory experience around ${draft.candidate.name}, with cultural contributors shaping the concept. This is a creative direction, not a validated recommendation. Objective supplied for planning: ${draft.form.objective}` },
-      { title: 'Venue options', content: 'None sourced. No venue-data provider is connected, so no venue names, addresses, capacities, availability, or suitability claims are included.' },
-      { title: 'Budget breakdown', content: `No itemized vendor quotes are available. The entered range (${draft.form.budgetRange}) is a user-supplied planning constraint, not an estimate. Obtain sourced quotes for venue, production, contributors, accessibility, insurance, staffing, and measurement before approving spend.` },
-      { title: 'Execution timeline', content: '1. Validate the concept with the intended audience and local contributors before booking. 2. Source venues and partners; confirm availability, permissions, accessibility, and itemized costs. 3. Produce a small opt-in pilot only after approvals. 4. Measure the agreed objectives during and after the pilot; timing depends on partner and venue confirmation.' },
-      { title: 'Partners and resources', content: 'To source and validate: local cultural contributors, a venue host, a production lead, research support, accessibility and safety support, and any required permits. No partner is confirmed.' },
-      { title: 'Risks and mitigations', content: 'The bridge may not resonate: test it with the intended audience first. The concept may feel extractive or tokenizing: involve compensated cultural contributors early and give them meaningful decision-making power. Venue, permissions, and costs are unknown: obtain written confirmation and itemized quotes before committing.' },
-      { title: 'Success metrics', content: 'Proposed measures to agree before the pilot: qualified opt-ins, participation rate, concept recall, participant-reported relevance, and follow-up interest in the experience. No target values or outcomes are forecast.' },
-      { title: 'Audience-interest test', content: `Run a small, opt-in concept test with people who self-identify as interested in ${draft.form.interestA}, ${draft.form.interestB}, or both. Show a neutral ${draft.candidate.name} experience concept, measure stated relevance, and record how the sample was recruited. Stated interest is not a forecast of attendance or campaign performance.` },
-    ],
-    planningEstimates: { budgetRange: draft.form.budgetRange, status: 'User-supplied planning input only; not a cost estimate or supplier quote.' },
-    evidence: draft.candidate.evidence,
-    source: draft.response.source,
-    caveat: draft.response.caveat,
-    assumptions: ['Audience fit and experience direction are hypotheses to test.', 'No venue, partner, permit, or supplier quote has been confirmed.', 'Costs, attendance, and campaign outcomes are not estimates or guarantees.'],
-  }) : null, [draft]);
+  const [expandedPlanId, setExpandedPlanId] = useState<number | null>(null);
+  const planContent = useMemo(
+    () => (draft ? buildActivationPlanContent(draft) : null),
+    [draft],
+  );
   const saveCurrent = (event: FormEvent) => {
     event.preventDefault();
     if (!draft || !planContent || !title.trim()) return;
     setSaveError(false);
-    savePlan.mutate({ data: { title, city: draft.form.city, interestA: draft.form.interestA, interestB: draft.form.interestB, bridgeName: draft.candidate.name, objective: draft.form.objective, plan: planContent } }, {
+    savePlan.mutate({ data: buildActivationPlanSaveInput(title, draft, planContent) }, {
       onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); setDraft(null); sessionStorage.removeItem('atlas:draft-plan'); setTitle(''); },
       onError: () => setSaveError(true),
     });
@@ -658,13 +692,26 @@ function PlansPage() {
     </div>}
     <Panel><div className="mb-4 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#78849a]">Workspace library</div><h2 className="mt-1 text-[16px] font-semibold">Saved activation plans</h2></div><span className="mono rounded-md border border-white/[.08] px-2 py-1 text-[9px] text-[#7c879c]">{plansQuery.data?.length ?? '—'} plans</span></div>
       {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}
-      {plansQuery.isLoading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : plansQuery.isError ? <ErrorNotice title="Saved plans could not be loaded" onRetry={() => plansQuery.refetch()} /> : !plansQuery.data?.length ? <div className="rounded-xl border border-dashed border-white/[.1] px-5 py-10 text-center"><FileText size={22} className="mx-auto text-[#727f95]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">{draft ? 'Your first plan is ready to save' : 'No saved plans yet'}</h3><p className="mx-auto mt-1 max-w-[400px] text-[10px] leading-5 text-[#7b879c]">{draft ? 'Give the brief a title above, then save it to the workspace library.' : 'Choose “Build plan” on a discovery bridge to create a clearly labeled working brief.'}</p></div> : <div className="space-y-2">{plansQuery.data.map((plan) => <PlanRow key={plan.id} plan={plan} onExport={() => exportPlan(plan)} onDelete={() => removePlan(plan)} deleting={deletePlan.isPending} />)}</div>}
+      {plansQuery.isLoading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : plansQuery.isError ? <ErrorNotice title="Saved plans could not be loaded" onRetry={() => plansQuery.refetch()} /> : !plansQuery.data?.length ? <div className="rounded-xl border border-dashed border-white/[.1] px-5 py-10 text-center"><FileText size={22} className="mx-auto text-[#727f95]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">{draft ? 'Your first plan is ready to save' : 'No saved plans yet'}</h3><p className="mx-auto mt-1 max-w-[400px] text-[10px] leading-5 text-[#7b879c]">{draft ? 'Give the brief a title above, then save it to the workspace library.' : 'Choose “Build plan” on a discovery bridge to create a clearly labeled working brief.'}</p></div> : <div className="space-y-2">{plansQuery.data.map((plan) => <PlanRow key={plan.id} plan={plan} expanded={expandedPlanId === plan.id} onToggle={() => setExpandedPlanId(expandedPlanId === plan.id ? null : plan.id)} onExport={() => exportPlan(plan)} onDelete={() => removePlan(plan)} deleting={deletePlan.isPending} />)}</div>}
     </Panel>
   </div>;
 }
 
-function PlanRow({ plan, onExport, onDelete, deleting }: { plan: ActivationPlan; onExport: () => void; onDelete: () => void; deleting: boolean }) {
-  return <div className="flex flex-col justify-between gap-3 rounded-xl border border-white/[.07] bg-white/[.018] p-4 sm:flex-row sm:items-center" data-testid={`row-plan-${plan.id}`}><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[12px] font-semibold text-[#d6dbe6]">{plan.title}</h3><EvidenceKind kind="hypothesis" /></div><div className="mt-1 text-[10px] text-[#7e899f]">{plan.bridgeName} · {plan.city} · {formatDate(plan.createdAt)}</div><div className="mt-1 truncate text-[10px] text-[#909bb0]">{plan.interestA} × {plan.interestB}</div></div><div className="flex shrink-0 items-center gap-1"><Button variant="quiet" onClick={onExport} className="text-[10px]"><Download size={13} />Export</Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${plan.title}`}><Trash2 size={14} /></Button></div></div>;
+function PlanRow({ plan, expanded, onToggle, onExport, onDelete, deleting }: { plan: ActivationPlan; expanded: boolean; onToggle: () => void; onExport: () => void; onDelete: () => void; deleting: boolean }) {
+  const details = getSavedPlanDetails(plan.plan);
+  return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`row-plan-${plan.id}`}>
+    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[12px] font-semibold text-[#d6dbe6]">{plan.title}</h3><EvidenceKind kind="hypothesis" /></div><div className="mt-1 text-[10px] text-[#7e899f]">{plan.bridgeName} · {plan.city} · {formatDate(plan.createdAt)}</div><div className="mt-1 truncate text-[10px] text-[#909bb0]">{plan.interestA} × {plan.interestB}</div></div>
+      <div className="flex shrink-0 items-center gap-1"><Button variant="quiet" onClick={onToggle} className="text-[10px]" aria-expanded={expanded}>{expanded ? 'Close details' : 'Inspect plan'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="quiet" onClick={onExport} className="text-[10px]"><Download size={13} />Export</Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${plan.title}`}><Trash2 size={14} /></Button></div>
+    </div>
+    {expanded && <div className="mt-4 space-y-4 border-t border-white/[.07] pt-4">
+      <div className="rounded-lg border border-white/[.07] bg-white/[.018] p-3 text-[10px] leading-5 text-[#aeb8ca]"><div><strong className="text-[#d3d9e5]">Bridge:</strong> {plan.bridgeName || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">Inputs:</strong> {plan.interestA || 'Not recorded'} × {plan.interestB || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">City/locality:</strong> {plan.city || 'Not recorded'}</div>{plan.objective && <div><strong className="text-[#d3d9e5]">Objective:</strong> {plan.objective}</div>}</div>
+      <div className="rounded-lg border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]">This is the stored plan snapshot. It does not refresh automatically or remain linked to a discovery record.</div>
+      <section><div className="eyebrow text-[9px] text-[#78849a]">Stored source evidence</div>{details.source && <div className="mt-1 text-[9px] text-[#909bb0]">Response source: {details.source}</div>}{details.evidence.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.evidence.map((item, index) => <div key={`${item.source}-${index}`} className="rounded-lg border border-cyan-100/[.08] bg-cyan-100/[.02] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#c5ccda]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#929db2]">{item.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">Source · {item.source}</div></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored evidence details are available on this plan.</p>}{details.caveat && <p className="mt-2 text-[10px] leading-5 text-[#aab4c6]">Stored caveat: {details.caveat}</p>}</section>
+      <section><div className="eyebrow text-[9px] text-[#bca26d]">Generated planning content · hypotheses and unsourced suggestions</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
+      <section className="rounded-lg border border-white/[.07] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Budget constraint</div>{details.budgetRange || details.budgetStatus ? <><div className="mt-1 text-[10px] text-[#c5ccda]">{details.budgetRange ?? 'Range not recorded'}</div>{details.budgetStatus && <div className="mt-1 text-[9px] text-[#8792a6]">{details.budgetStatus}</div>}</> : <p className="mt-1 text-[10px] text-[#8792a6]">No budget constraint was stored.</p>}</section>
+    </div>}
+  </article>;
 }
 
 function SavedPage() {
@@ -695,9 +742,9 @@ function SavedPage() {
 }
 
 function SavedCard({ item, expanded, onExpand, onDelete, deleting }: { item: SavedDiscovery; expanded: boolean; onExpand: () => void; onDelete: () => void; deleting: boolean }) {
-  const result = item.result as Record<string, unknown>;
-  const candidate = result?.selectedBridge as BridgeCandidate | undefined;
-  const caveat = typeof result?.caveat === 'string' ? result.caveat : 'Saved result did not include a source caveat.';
+  const savedDetails = getSavedDiscoveryDetails(item.result);
+  const candidate = savedDetails.candidate;
+  const caveat = savedDetails.caveat ?? 'Saved result did not include a source caveat.';
   return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`card-saved-${item.id}`}><div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onExpand} className="min-w-0 flex-1 text-left" data-testid={`button-open-saved-${item.id}`}><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[13px] font-semibold text-[#dce0ea]">{item.title}</h2><span className="rounded-full border border-cyan-100/10 px-2 py-0.5 text-[8px] text-[#7edce3]">Saved record</span></div><div className="mt-1.5 text-[10px] text-[#838ea4]">{item.interestA} <span className="text-[#a995f1]">×</span> {item.interestB} · {item.city} · {formatDate(item.createdAt)}</div></button><div className="flex items-center gap-1"><Button variant="quiet" className="text-[10px]" onClick={onExpand}>{expanded ? 'Close details' : 'Inspect result'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${item.title}`}><Trash2 size={14} /></Button></div></div>
     {expanded && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="eyebrow text-[9px] text-[#77849a]">Stored response · no refresh implied</div>{candidate ? <div className="mt-3 rounded-lg border border-white/[.07] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="text-[12px] font-semibold text-[#d6dbe7]">{candidate.name}</div><div className="mono text-[11px] text-[#b2a0f1]">{candidate.score}/100 · derived</div></div><p className="mt-2 text-[10px] leading-5 text-[#929db2]">{candidate.explanation}</p>{candidate.evidence?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{candidate.evidence.map((ev, idx) => <div key={idx} className="rounded-lg bg-white/[.025] p-2.5"><div className="flex justify-between gap-2"><span className="text-[10px] text-[#c5ccda]">{ev.label}</span><EvidenceKind kind={ev.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#8995aa]">{ev.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">{ev.source}</div></div>)}</div>}</div> : <div className="text-[10px] text-[#8994a8]">No selected bridge details were stored in this record.</div>}<p className="mt-3 text-[10px] leading-5 text-[#8b96ab]">Caveat: {caveat}</p></div>}
   </article>;
@@ -773,7 +820,92 @@ function Router() {
 }
 
 function App() {
-  return <QueryClientProvider client={queryClient}><Router /></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><AuthGate><Router /></AuthGate></QueryClientProvider>;
+}
+
+function AuthGate({ children }: { children: ReactNode }) {
+  const authSession = useQuery<AuthSession>({
+    queryKey: authSessionQueryKey,
+    queryFn: fetchAuthSession,
+    retry: false,
+  });
+  const authQueryClient = useQueryClient();
+  const currentUser = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!authSession.data) return;
+    const nextUser = authSession.data.authenticated
+      ? authSession.data.user?.email ?? null
+      : null;
+    if (currentUser.current !== undefined && currentUser.current !== nextUser) {
+      authQueryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== 'auth',
+      });
+    }
+    currentUser.current = nextUser;
+  }, [
+    authQueryClient,
+    authSession.data?.authenticated,
+    authSession.data?.user?.email,
+  ]);
+
+  useEffect(() => {
+    const clearWorkspaceData = () => {
+      authQueryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== 'auth',
+      });
+      void authQueryClient.invalidateQueries({ queryKey: authSessionQueryKey });
+    };
+
+    const channel = typeof BroadcastChannel === 'undefined'
+      ? null
+      : new BroadcastChannel('cca-auth');
+    const handleSessionEnded = () => {
+      clearWorkspaceData();
+      channel?.postMessage('session-ended');
+    };
+    const handleBroadcast = (event: MessageEvent<unknown>) => {
+      if (event.data === 'session-ended') clearWorkspaceData();
+    };
+    const refreshCsrfToken = () => {
+      void authQueryClient.invalidateQueries({ queryKey: authSessionQueryKey });
+    };
+    window.addEventListener('auth:unauthorized', handleSessionEnded);
+    window.addEventListener('auth:session-ended', handleSessionEnded);
+    window.addEventListener('auth:csrf-invalid', refreshCsrfToken);
+    channel?.addEventListener('message', handleBroadcast);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleSessionEnded);
+      window.removeEventListener('auth:session-ended', handleSessionEnded);
+      window.removeEventListener('auth:csrf-invalid', refreshCsrfToken);
+      channel?.removeEventListener('message', handleBroadcast);
+      channel?.close();
+    };
+  }, [authQueryClient]);
+
+  if (authSession.isLoading) {
+    return <main className="grid min-h-[100dvh] place-items-center text-sm text-[#aab3c7]">Checking sign-in…</main>;
+  }
+  if (authSession.isError) {
+    return <main className="grid min-h-[100dvh] place-items-center p-6">
+      <section role="alert" className="surface max-w-md rounded-2xl p-8 text-center text-sm text-rose-200">
+        <p>Sign-in service is unavailable. Please retry.</p>
+        <Button className="mt-4" onClick={() => void authSession.refetch()}>Retry</Button>
+      </section>
+    </main>;
+  }
+  if (!authSession.data?.authenticated) {
+    const rejected = new URLSearchParams(window.location.search).get('authError') === 'sign_in_failed';
+    return <main className="grid min-h-[100dvh] place-items-center p-6">
+      <section className="surface max-w-md rounded-2xl p-8 text-center">
+        <h1 className="text-xl font-semibold text-[#f0eff8]">Cultural Collision Atlas</h1>
+        <p className="mt-3 text-sm leading-6 text-[#9ba5b9]">Sign in with an authorized Google account to open your private workspace.</p>
+        {rejected && <p role="alert" className="mt-4 text-xs text-rose-200">Sign-in was not completed or this account is not authorized.</p>}
+        <a className="mt-6 inline-flex rounded-[10px] bg-[#9b82ed] px-4 py-2.5 text-sm font-semibold text-[#171322]" href="/api/auth/login">Continue with Google</a>
+      </section>
+    </main>;
+  }
+  return children;
 }
 
 export default App;
