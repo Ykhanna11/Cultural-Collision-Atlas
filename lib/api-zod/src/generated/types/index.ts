@@ -10,6 +10,7 @@ export * from './activationPlan';
 export * from './atlasOverview';
 export * from './bridgeCandidate';
 export * from './bridgeCandidateConfidence';
+export * from './bridgeCandidateLocalityStatus';
 export * from './discoveryInput';
 export * from './discoveryInputActivationType';
 export * from './discoveryInputRecommendationType';

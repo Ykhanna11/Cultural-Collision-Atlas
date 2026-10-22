@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { BridgeCandidateConfidence } from './bridgeCandidateConfidence';
+import type { BridgeCandidateLocalityStatus } from './bridgeCandidateLocalityStatus';
 import type { EvidenceItem } from './evidenceItem';
 
 export interface BridgeCandidate {
@@ -19,5 +20,8 @@ export interface BridgeCandidate {
   score: number;
   scoreDescription: string;
   confidence: BridgeCandidateConfidence;
+  /** @nullable */
+  localityCityEntityId?: string | null;
+  localityStatus?: BridgeCandidateLocalityStatus;
   evidence: EvidenceItem[];
 }

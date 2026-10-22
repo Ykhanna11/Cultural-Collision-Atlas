@@ -21,6 +21,7 @@ export function isQlooRecommendationType(
 export interface QlooInsightRequest {
   entityIds: string[];
   city: string;
+  cityEntityId?: string;
   entityType?: QlooRecommendationType;
 }
 
@@ -30,7 +31,9 @@ export async function requestRecommendations(
   return qlooGet("/v2/insights/", {
     "filter.type": input.entityType ?? DEFAULT_QLOO_RECOMMENDATION_TYPE,
     "signal.interests.entities": input.entityIds,
-    "signal.location.query": input.city,
+    ...(input.cityEntityId
+      ? { "signal.location": input.cityEntityId }
+      : { "signal.location.query": input.city }),
     "feature.explainability": "true",
   });
 }
@@ -39,8 +42,14 @@ export async function compareSingleInterest(
   entityId: string,
   city: string,
   entityType?: QlooRecommendationType,
+  cityEntityId?: string,
 ): Promise<unknown> {
-  return requestRecommendations({ entityIds: [entityId], city, entityType });
+  return requestRecommendations({
+    entityIds: [entityId],
+    city,
+    entityType,
+    cityEntityId,
+  });
 }
 
 export async function compareJointInterests(
@@ -48,11 +57,13 @@ export async function compareJointInterests(
   entityBId: string,
   city: string,
   entityType?: QlooRecommendationType,
+  cityEntityId?: string,
 ): Promise<unknown> {
   return requestRecommendations({
     entityIds: [entityAId, entityBId],
     city,
     entityType,
+    cityEntityId,
   });
 }
 

@@ -312,6 +312,11 @@ components:
         type: { type: ["string", "null"] }
         subtype: { type: ["string", "null"] }
         description: { type: ["string", "null"] }
+        placeType: { type: ["string", "null"] }
+        administrativeLevel: { type: ["integer", "null"] }
+        ancestorNames:
+          type: array
+          items: { type: string }
         source: { type: string }
       required: [id, name, source]
     EntitySearchResponse:
@@ -330,6 +335,7 @@ components:
         interestAId: { type: string, minLength: 1, maxLength: 160 }
         interestBId: { type: string, minLength: 1, maxLength: 160 }
         city: { type: string, minLength: 1, maxLength: 120 }
+        cityEntityId: { type: string, format: uuid }
         recommendationType:
           type: string
           enum: [urn:entity:brand, urn:entity:place, urn:entity:destination]
@@ -359,6 +365,10 @@ components:
         score: { type: number, minimum: 0, maximum: 100 }
         scoreDescription: { type: string }
         confidence: { type: string, enum: [low, medium, high] }
+        localityCityEntityId: { type: ["string", "null"] }
+        localityStatus:
+          type: string
+          enum: [matches_selected_city, outside_selected_city, unavailable]
         evidence:
           type: array
           items: { $ref: "#/components/schemas/EvidenceItem" }

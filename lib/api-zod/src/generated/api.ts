@@ -86,6 +86,9 @@ export const SearchQlooEntitiesResponse = zod.object({
   "type": zod.string().nullish(),
   "subtype": zod.string().nullish(),
   "description": zod.string().nullish(),
+  "placeType": zod.string().nullish(),
+  "administrativeLevel": zod.number().int().nullish(),
+  "ancestorNames": zod.array(zod.string()).optional(),
   "source": zod.string()
 }))
 })
@@ -119,6 +122,7 @@ export const DiscoverCulturalBridgesBody = zod.object({
   "interestAId": zod.string().min(1).max(discoverCulturalBridgesBodyInterestAIdMax),
   "interestBId": zod.string().min(1).max(discoverCulturalBridgesBodyInterestBIdMax),
   "city": zod.string().min(1).max(discoverCulturalBridgesBodyCityMax),
+  "cityEntityId": zod.string().uuid().optional(),
   "recommendationType": zod.enum(['urn:entity:brand', 'urn:entity:place', 'urn:entity:destination']).optional(),
   "activationType": zod.enum(['pop-up', 'live_event', 'brand_collaboration', 'retail_experience', 'community_event']),
   "budgetRange": zod.string().min(1).max(discoverCulturalBridgesBodyBudgetRangeMax),
@@ -140,6 +144,8 @@ export const DiscoverCulturalBridgesResponse = zod.object({
   "score": zod.number().min(discoverCulturalBridgesResponseCandidatesItemScoreMin).max(discoverCulturalBridgesResponseCandidatesItemScoreMax),
   "scoreDescription": zod.string(),
   "confidence": zod.enum(['low', 'medium', 'high']),
+  "localityCityEntityId": zod.string().nullish(),
+  "localityStatus": zod.enum(['matches_selected_city', 'outside_selected_city', 'unavailable']).optional(),
   "evidence": zod.array(zod.object({
   "source": zod.string(),
   "label": zod.string(),

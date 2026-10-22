@@ -17,6 +17,10 @@ import {
   isQlooRecommendationType,
 } from "../lib/qloo/insights";
 import { isQlooConfigured } from "../lib/qloo/client";
+import {
+  isQlooEntityId,
+  isVerifiedQlooCityLocality,
+} from "../lib/qloo/entities";
 
 const router: IRouter = Router();
 
@@ -45,14 +49,37 @@ router.post("/discoveries", async (req, res): Promise<void> => {
 
   const input = parsed.data;
   try {
+    if (input.cityEntityId) {
+      if (
+        !isQlooEntityId(input.cityEntityId) ||
+        !(await isVerifiedQlooCityLocality(input.cityEntityId))
+      ) {
+        res.status(400).json({
+          error: "Select a valid Qloo city locality before discovering.",
+        });
+        return;
+      }
+    }
+
     const [resultsA, resultsB, jointResults] = await Promise.all([
-      compareSingleInterest(input.interestAId, input.city, recommendationType),
-      compareSingleInterest(input.interestBId, input.city, recommendationType),
+      compareSingleInterest(
+        input.interestAId,
+        input.city,
+        recommendationType,
+        input.cityEntityId,
+      ),
+      compareSingleInterest(
+        input.interestBId,
+        input.city,
+        recommendationType,
+        input.cityEntityId,
+      ),
       compareJointInterests(
         input.interestAId,
         input.interestBId,
         input.city,
         recommendationType,
+        input.cityEntityId,
       ),
     ]);
 
@@ -62,6 +89,7 @@ router.post("/discoveries", async (req, res): Promise<void> => {
       interestB: input.interestB,
       interestBId: input.interestBId,
       recommendationType,
+      selectedCityEntityId: input.cityEntityId,
       resultsA,
       resultsB,
       jointResults,
@@ -75,6 +103,11 @@ router.post("/discoveries", async (req, res): Promise<void> => {
         candidates: ranked,
         caveat:
           "Qloo's joint-interest results and any matching single-interest results are aggregate recommendation evidence. Candidate confidence indicates whether per-result explainability explicitly returned positive contributions from both selected entities, one, or neither; Qloo may omit lower-impact contributions. This does not prove that the same individuals share both interests or predict activation success. The score is derived only from returned Qloo affinity or affinity rank, not input attribution or probability." +
+          (recommendationType === "urn:entity:place"
+            ? input.cityEntityId
+              ? " Place locality status compares the returned city entity ID with the selected Qloo city ID using a city-proper interpretation; it is geographic evidence, not cultural relevance evidence."
+              : " Place locality status is unavailable because this request did not select a canonical Qloo city ID; it is geographic evidence, not cultural relevance evidence."
+            : "") +
           (hasTwoSidedCandidates
             ? ""
             : " No returned candidate has explicit positive per-result attribution from both selected entities; one-sided or unavailable-attribution results should be treated as exploratory, not substantiated two-interest bridges."),

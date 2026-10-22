@@ -60,7 +60,7 @@ export function getQlooStatus() {
 }
 
 export async function qlooGet<T = unknown>(
-  path: "/search" | "/v2/insights/",
+  path: "/search" | "/entities" | "/v2/insights/",
   query: QlooQuery,
 ): Promise<T> {
   const apiKey = process.env[QLOO_API_KEY_ENV]?.trim();

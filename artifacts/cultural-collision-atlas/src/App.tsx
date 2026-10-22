@@ -15,7 +15,7 @@ import {
   useSearchQlooEntities, useTestQlooConnection,
 } from '@workspace/api-client-react';
 import type {
-  ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, QlooStatus,
+  ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
   SavedDiscovery,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
@@ -264,13 +264,16 @@ function DiscoveryPage() {
   const [entitySide, setEntitySide] = useState<'a' | 'b' | null>(null);
   const [entityText, setEntityText] = useState('');
   const [entitySearchType, setEntitySearchType] = useState<EntitySearchType | ''>('');
+  const [selectedLocality, setSelectedLocality] = useState<EntityEvidence | null>(null);
+  const [localityQuery, setLocalityQuery] = useState('');
   const discover = useDiscoverCulturalBridges();
   const search = useSearchQlooEntities();
+  const localitySearch = useSearchQlooEntities();
   const save = useSaveDiscovery();
   const qc = useQueryClient();
   const status = useGetQlooStatus();
   const change = (key: keyof DiscoveryInput, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
-  const canDiscover = !!form.interestA.trim() && !!form.interestB.trim() && !!form.interestAId.trim() && !!form.interestBId.trim() && !!form.city.trim() && !!form.budgetRange.trim() && !!form.objective.trim();
+  const canDiscover = !!form.interestA.trim() && !!form.interestB.trim() && !!form.interestAId.trim() && !!form.interestBId.trim() && !!form.city.trim() && !!form.cityEntityId && !!form.budgetRange.trim() && !!form.objective.trim();
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!canDiscover) return;
@@ -289,6 +292,25 @@ function DiscoveryPage() {
         ...(entitySearchType && { types: [entitySearchType] }),
       },
     });
+  };
+  const searchCityLocalities = () => {
+    const query = form.city.trim();
+    if (!query) return;
+    setLocalityQuery(query);
+    setSelectedLocality(null);
+    setForm((previous) => ({ ...previous, cityEntityId: undefined }));
+    setResponse(null);
+    setSelected(null);
+    discover.reset();
+    localitySearch.mutate({ data: { query, types: ['urn:entity:locality'] } });
+  };
+  const changeCity = (value: string) => {
+    setForm((previous) => ({ ...previous, city: value, cityEntityId: undefined }));
+    setSelectedLocality(null);
+    setLocalityQuery('');
+    localitySearch.reset();
+    setResponse(null);
+    setSelected(null);
   };
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
@@ -326,7 +348,12 @@ function DiscoveryPage() {
             {search.isPending && <div className="rounded-lg border border-white/[.08] p-3 text-[10px] text-[#8d98ad]"><LoaderCircle className="mr-2 inline animate-spin" size={12} />Searching connected entity catalog…</div>}
             {search.data && entitySide && entityText === (entitySide === 'a' ? form.interestA : form.interestB) && <div className="rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-3"><div className="mb-2 flex items-center justify-between text-[10px] text-[#a9e5ea]">Catalog results for “{entityText}”<button onClick={() => { setEntitySide(null); }} type="button" aria-label="Dismiss catalog results"><X size={13} /></button></div>{search.data.entities.length ? <div className="space-y-1">{search.data.entities.map((entity) => <button type="button" key={entity.id} onClick={() => { if (entitySide === 'a') { change('interestA', entity.name); change('interestAId', entity.id); } if (entitySide === 'b') { change('interestB', entity.name); change('interestBId', entity.id); } setEntitySide(null); }} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]"><span className="flex w-full items-start justify-between gap-3"><span className="min-w-0 text-[11px] text-[#d7dce8]">{entity.name}<span className="mt-0.5 block mono text-[8px] text-[#778398]">{entity.id}</span></span><span className="shrink-0 text-right text-[9px] text-[#aab8ca]">{entity.type ?? 'Type unavailable'}{entity.subtype && <span className="block text-[8px] text-[#8d9bae]">Subtype: {entity.subtype}</span>}</span></span>{entity.description && <span className="line-clamp-2 pr-1 text-[9px] leading-4 text-[#8e9bb0]">{entity.description}</span>}</button>)}</div> : <div className="text-[10px] text-[#818ca1]">No matching entities returned.</div>}</div>}
             {search.isError && <div className="text-[10px] text-rose-200/80">Catalog search unavailable. Check the Qloo connection in settings.</div>}
-            <Field label="City" required><div className="relative"><MapPin size={14} className="absolute left-3 top-3.5 text-[#707b92]" /><input className="field pl-9" maxLength={120} value={form.city} onChange={(e) => change('city', e.target.value)} placeholder="Where should this live?" data-testid="input-city" /></div></Field>
+            <Field label="City" required><div className="flex gap-2"><div className="relative min-w-0 flex-1"><MapPin size={14} className="absolute left-3 top-3.5 text-[#707b92]" /><input className="field pl-9" maxLength={120} value={form.city} onChange={(e) => changeCity(e.target.value)} placeholder="Where should this live?" data-testid="input-city" disabled={discover.isPending} /></div><Button type="button" variant="outline" className="shrink-0 px-2" onClick={searchCityLocalities} disabled={!form.city.trim() || localitySearch.isPending || discover.isPending} aria-label="Search Qloo city localities">{localitySearch.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}</Button></div></Field>
+            <p className="-mt-2 text-[9px] leading-4 text-[#78849a]">Search and select the intended Qloo city entity. Ambiguous matches are never selected automatically.</p>
+            {selectedLocality && <div className="rounded-lg border border-cyan-100/10 bg-cyan-100/[.025] px-3 py-2 text-[9px] leading-4 text-[#a8dfe3]">Selected Qloo locality: <b>{selectedLocality.name}</b>{selectedLocality.placeType && ` · ${selectedLocality.placeType}`}{selectedLocality.administrativeLevel != null && ` · admin level ${selectedLocality.administrativeLevel}`}<span className="mono mt-1 block break-all text-[#8c9db0]">{selectedLocality.id}</span></div>}
+            {localitySearch.isPending && <div className="rounded-lg border border-white/[.08] p-3 text-[10px] text-[#8d98ad]"><LoaderCircle className="mr-2 inline animate-spin" size={12} />Searching Qloo city localities…</div>}
+            {localitySearch.data && localityQuery === form.city.trim() && <div className="max-h-48 space-y-1 overflow-auto rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-2" role="listbox" aria-label="Qloo city locality results">{localitySearch.data.entities.length ? localitySearch.data.entities.map((entity) => <button key={entity.id} type="button" role="option" aria-selected={form.cityEntityId === entity.id} disabled={entity.placeType !== 'city' || discover.isPending} onClick={() => { setSelectedLocality(entity); setForm((previous) => ({ ...previous, cityEntityId: entity.id })); setResponse(null); setSelected(null); }} className={cx('w-full rounded-lg px-2 py-2 text-left hover:bg-white/[.05] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent', form.cityEntityId === entity.id && 'bg-cyan-100/[.06]')}><span className="flex items-start justify-between gap-2"><span className="text-[10px] font-semibold text-[#d8e0ec]">{entity.name}</span><span className="shrink-0 text-[8px] text-[#aab8ca]">{entity.placeType ?? 'Place type unavailable'}{entity.administrativeLevel != null && ` · admin ${entity.administrativeLevel}`}</span></span>{entity.ancestorNames?.length ? <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestors: {entity.ancestorNames.join(' · ')}</span> : <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestor context unavailable</span>}<span className="mono mt-1 block break-all text-[8px] text-[#718096]">{entity.id}</span>{entity.placeType !== 'city' && <span className="mt-1 block text-[8px] text-[#be9d73]">Not selectable: choose a city-level result.</span>}</button>) : <div className="px-2 py-3 text-[10px] text-[#818ca1]">No locality results returned. Try a more specific city query.</div>}</div>}
+            {localitySearch.isError && <div className="text-[10px] text-rose-200/80">Qloo locality search failed; no city was selected.</div>}
             <Field label="Activation type" required><div className="relative"><select className="field appearance-none pr-9" value={form.activationType} onChange={(e) => change('activationType', e.target.value)} data-testid="select-activation-type"><option value="pop-up">Pop-up</option><option value="live_event">Live event</option><option value="brand_collaboration">Brand collaboration</option><option value="retail_experience">Retail experience</option><option value="community_event">Community event</option></select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-3.5 text-[#758097]" /></div></Field>
             <Field label="Budget range" required><input className="field" maxLength={80} value={form.budgetRange} onChange={(e) => change('budgetRange', e.target.value)} placeholder="e.g. $25k–$50k" data-testid="input-budget-range" /></Field>
             <Field label="Objective" required><textarea className="field min-h-[76px] resize-y" maxLength={300} value={form.objective} onChange={(e) => change('objective', e.target.value)} placeholder="What should the activation change or prove?" data-testid="input-objective" /></Field>
@@ -386,6 +413,11 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
               return <div key={interest} className="text-[10px] leading-5 text-[#a3adbf]"><span className="font-semibold text-[#cbd2df]">{interest}: </span>{status}</div>;
             })}
           </div>
+          {recommendationType === 'urn:entity:place' && <div className="rounded-xl border border-white/[.07] bg-white/[.018] p-3">
+            <div className="text-[10px] font-semibold text-[#d2d7e4]">Place locality evidence</div>
+            <p className="mt-2 text-[10px] leading-5 text-[#a3adbf]">{candidate.localityStatus === 'matches_selected_city' ? 'Matches selected city' : candidate.localityStatus === 'outside_selected_city' ? 'Outside selected city' : 'Location unavailable'}. This compares Qloo city entity IDs under a city-proper interpretation; it does not establish cultural relevance.</p>
+            {typeof candidate.localityCityEntityId === 'string' && <p className="mono mt-2 break-all text-[8px] text-[#78849a]">Returned city entity ID · {candidate.localityCityEntityId}</p>}
+          </div>}
         </div>
       </div>
       {selected?.id === candidate.id && <div className="border-t border-white/[.07] bg-[#0c111c]/55 px-5 py-4"><div className="mb-3 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#8791a7]">Evidence ledger</div><div className="mt-1 text-[10px] text-[#707b90]">{candidate.scoreDescription}</div></div><CircleHelp size={15} className="text-[#748097]" /></div>{evidenceItems.length ? <div className="grid gap-2 md:grid-cols-2">{evidenceItems.map((item, i) => <div key={`${item.source}-${i}`} className="rounded-xl border border-white/[.07] bg-white/[.018] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#d2d7e4]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-2 text-[11px] leading-5 text-[#a3adbf]">{item.value}</div><div className="mt-2 mono text-[9px] text-[#727e94]">Source · {item.source}</div></div>)}</div> : <EmptyInline title="No evidence details returned" description="This candidate has no evidence records to inspect." />}</div>}

@@ -75,6 +75,11 @@ export interface EntityEvidence {
   subtype?: string | null;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  placeType?: string | null;
+  /** @nullable */
+  administrativeLevel?: number | null;
+  ancestorNames?: string[];
   source: string;
 }
 
@@ -136,6 +141,7 @@ export interface DiscoveryInput {
      * @maxLength 120
      */
   city: string;
+  cityEntityId?: string;
   recommendationType?: DiscoveryInputRecommendationType;
   activationType: DiscoveryInputActivationType;
   /**
@@ -178,6 +184,15 @@ export const BridgeCandidateConfidence = {
   high: 'high',
 } as const;
 
+export type BridgeCandidateLocalityStatus = typeof BridgeCandidateLocalityStatus[keyof typeof BridgeCandidateLocalityStatus];
+
+
+export const BridgeCandidateLocalityStatus = {
+  matches_selected_city: 'matches_selected_city',
+  outside_selected_city: 'outside_selected_city',
+  unavailable: 'unavailable',
+} as const;
+
 export interface BridgeCandidate {
   id: string;
   name: string;
@@ -189,6 +204,9 @@ export interface BridgeCandidate {
   score: number;
   scoreDescription: string;
   confidence: BridgeCandidateConfidence;
+  /** @nullable */
+  localityCityEntityId?: string | null;
+  localityStatus?: BridgeCandidateLocalityStatus;
   evidence: EvidenceItem[];
 }
 

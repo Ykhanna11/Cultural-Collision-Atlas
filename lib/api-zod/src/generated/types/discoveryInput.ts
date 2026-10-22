@@ -34,6 +34,7 @@ export interface DiscoveryInput {
      * @maxLength 120
      */
   city: string;
+  cityEntityId?: string;
   recommendationType?: DiscoveryInputRecommendationType;
   activationType: DiscoveryInputActivationType;
   /**

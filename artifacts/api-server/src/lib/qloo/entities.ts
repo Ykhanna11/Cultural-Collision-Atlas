@@ -6,6 +6,9 @@ export interface QlooEntity {
   type: string | null;
   subtype: string | null;
   description: string | null;
+  placeType: string | null;
+  administrativeLevel: number | null;
+  ancestorNames: string[];
   source: "qloo_api";
 }
 
@@ -30,6 +33,10 @@ export async function searchQlooEntities(
     take: "8",
     ...(types && { types }),
   });
+  return parseQlooEntityResults(payload);
+}
+
+export function parseQlooEntityResults(payload: unknown): QlooEntity[] {
   const root = isRecord(payload) ? payload : null;
   const rawResults = root?.results;
   const entities = Array.isArray(rawResults)
@@ -58,6 +65,9 @@ export async function searchQlooEntities(
       rawDescription && !/^(none|null|undefined)$/i.test(rawDescription.trim())
         ? rawDescription.trim()
         : null;
+    const ancestors = Array.isArray(properties?.ancestors)
+      ? properties.ancestors
+      : [];
     return [{
       id,
       name,
@@ -69,7 +79,59 @@ export async function searchQlooEntities(
             : null,
       subtype: typeof entity.subtype === "string" ? entity.subtype : null,
       description,
+      placeType:
+        typeof properties?.place === "string" ? properties.place : null,
+      administrativeLevel:
+        typeof properties?.admin_level === "number" &&
+        Number.isInteger(properties.admin_level)
+          ? properties.admin_level
+          : null,
+      ancestorNames: ancestors.flatMap((ancestor): string[] =>
+        isRecord(ancestor) && typeof ancestor.name === "string"
+          ? [ancestor.name]
+          : [],
+      ),
       source: "qloo_api",
     }];
   });
+}
+
+export async function isVerifiedQlooCityLocality(
+  entityId: string,
+): Promise<boolean> {
+  const payload = await qlooGet<unknown>("/entities", {
+    entity_ids: [entityId],
+  });
+  return responseContainsCityLocality(payload, entityId);
+}
+
+export function responseContainsCityLocality(
+  payload: unknown,
+  entityId: string,
+): boolean {
+  const root = isRecord(payload) ? payload : null;
+  const rawResults = root?.results;
+  const entities = Array.isArray(rawResults)
+    ? rawResults
+    : isRecord(rawResults) && Array.isArray(rawResults.entities)
+      ? rawResults.entities
+      : null;
+  if (!entities) {
+    throw new Error("Qloo entity lookup returned an unrecognized response shape.");
+  }
+
+  return entities.some(
+    (entity) =>
+      isRecord(entity) &&
+      entity.entity_id === entityId &&
+      isRecord(entity.properties) &&
+      entity.properties.place === "city",
+  );
+}
+
+export function isQlooEntityId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+  );
 }

@@ -1,4 +1,5 @@
 import { isRecord } from "./qloo/client";
+import { isQlooEntityId } from "./qloo/entities";
 import type { QlooRecommendationType } from "./qloo/insights";
 
 interface RankedEntity {
@@ -7,6 +8,7 @@ interface RankedEntity {
   affinity: number | null;
   affinityRank: number | null;
   explainability: unknown;
+  localityCityEntityId: string | null;
 }
 
 interface InputAttribution {
@@ -51,8 +53,37 @@ function readRankedEntities(value: unknown): RankedEntity[] {
           ? affinityRank
           : null,
       explainability: query?.explainability ?? null,
+      localityCityEntityId:
+        isRecord(entity.properties) &&
+        isRecord(entity.properties.locality) &&
+        isRecord(entity.properties.locality.city) &&
+        typeof entity.properties.locality.city.entity_id === "string"
+          ? entity.properties.locality.city.entity_id
+          : null,
     }];
   });
+}
+
+export type LocalityStatus =
+  | "matches_selected_city"
+  | "outside_selected_city"
+  | "unavailable";
+
+export function localityStatusForCandidate(
+  recommendationType: QlooRecommendationType,
+  candidateCityEntityId: unknown,
+  selectedCityEntityId: unknown,
+): LocalityStatus | undefined {
+  if (recommendationType !== "urn:entity:place") return undefined;
+  if (
+    !isQlooEntityId(candidateCityEntityId) ||
+    !isQlooEntityId(selectedCityEntityId)
+  ) {
+    return "unavailable";
+  }
+  return candidateCityEntityId === selectedCityEntityId
+    ? "matches_selected_city"
+    : "outside_selected_city";
 }
 
 function scoreFromQlooSignals(item: RankedEntity): number {
@@ -148,6 +179,7 @@ export function rankBridgeCandidates(input: {
   interestB: string;
   interestBId: string;
   recommendationType: QlooRecommendationType;
+  selectedCityEntityId?: string;
   resultsA: unknown;
   resultsB: unknown;
   jointResults: unknown;
@@ -184,6 +216,11 @@ export function rankBridgeCandidates(input: {
         : strength === "one_sided"
           ? "medium" as const
           : "low" as const;
+    const localityStatus = localityStatusForCandidate(
+      input.recommendationType,
+      candidate.localityCityEntityId,
+      input.selectedCityEntityId,
+    );
     return [{
       id: candidate.id,
       name: candidate.name,
@@ -194,6 +231,12 @@ export function rankBridgeCandidates(input: {
       scoreDescription:
         "Derived bridge score from the joint result: Qloo affinity multiplied by 100 when returned; otherwise 100 divided by Qloo affinity rank when returned; otherwise 0. Input-attribution coverage is reflected separately in confidence. The score is not a probability.",
       confidence,
+      ...(input.recommendationType === "urn:entity:place"
+        ? {
+            localityCityEntityId: candidate.localityCityEntityId,
+            localityStatus,
+          }
+        : {}),
       evidence: [
         {
           source: "Qloo Insights API",

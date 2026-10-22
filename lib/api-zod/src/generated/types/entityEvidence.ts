@@ -15,5 +15,10 @@ export interface EntityEvidence {
   subtype?: string | null;
   /** @nullable */
   description?: string | null;
+  /** @nullable */
+  placeType?: string | null;
+  /** @nullable */
+  administrativeLevel?: number | null;
+  ancestorNames?: string[];
   source: string;
 }
