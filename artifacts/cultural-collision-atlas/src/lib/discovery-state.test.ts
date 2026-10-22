@@ -4,7 +4,7 @@ import {
   discoveryEvidenceReducer,
   nextDiscoveryRequestId,
   type DiscoveryEvidenceState,
-} from "./discovery-state";
+} from "./discovery-state.ts";
 
 const priorState: DiscoveryEvidenceState = {
   status: "idle",

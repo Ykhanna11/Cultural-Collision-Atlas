@@ -25,6 +25,10 @@ import {
   initialDiscoveryEvidenceState,
   nextDiscoveryRequestId,
 } from '@/lib/discovery-state';
+import {
+  mutationFeedbackReducer,
+  type MutationFeedback,
+} from '@/lib/mutation-feedback';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
@@ -268,7 +272,7 @@ function DiscoveryPage() {
     initialDiscoveryEvidenceState,
   );
   const { response, selected } = discoveryEvidence;
-  const [savedMessage, setSavedMessage] = useState('');
+  const [saveFeedback, dispatchSaveFeedback] = useReducer(mutationFeedbackReducer, null);
   const [entitySide, setEntitySide] = useState<'a' | 'b' | null>(null);
   const [entityText, setEntityText] = useState('');
   const [entitySearchType, setEntitySearchType] = useState<EntitySearchType | ''>('');
@@ -297,7 +301,7 @@ function DiscoveryPage() {
     search.reset();
     setEntitySide(null);
     setEntityText('');
-    setSavedMessage('');
+    dispatchSaveFeedback({ type: 'clear' });
     setForm((previous) => side === 'a'
       ? { ...previous, interestA: value, interestAId: entityId }
       : { ...previous, interestB: value, interestBId: entityId });
@@ -321,7 +325,7 @@ function DiscoveryPage() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!canDiscover) return;
-    setSavedMessage('');
+    dispatchSaveFeedback({ type: 'clear' });
     requestDiscovery(form);
   };
   const searchEntity = (side: 'a' | 'b') => {
@@ -356,8 +360,10 @@ function DiscoveryPage() {
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
     const title = `${form.interestA} × ${form.interestB}`;
+    dispatchSaveFeedback({ type: 'clear' });
     save.mutate({ data: { title, city: form.city, interestA: form.interestA, interestB: form.interestB, result: { source: response.source, generatedAt: response.generatedAt, caveat: response.caveat, selectedBridge: candidate } } }, {
-      onSuccess: () => { setSavedMessage('Discovery saved to your evidence trail.'); qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); },
+      onSuccess: () => { dispatchSaveFeedback({ type: 'success', message: 'Discovery saved to your evidence trail.' }); qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); },
+      onError: () => dispatchSaveFeedback({ type: 'error', message: 'Discovery could not be saved. Please try again.' }),
     });
   };
   const makePlan = (candidate: BridgeCandidate) => {
@@ -408,7 +414,7 @@ function DiscoveryPage() {
           {!response && discoveryEvidence.status === 'idle' && <div className="surface flex min-h-[475px] flex-col items-center justify-center rounded-2xl px-6 text-center"><div className="relative mb-6 flex h-[90px] w-[90px] items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.04]"><div className="absolute inset-3 rounded-full border border-cyan-200/10" /><Waypoints size={27} className="text-[#a890f2]" /><span className="absolute right-1 top-4 h-2 w-2 rounded-full bg-[#70dce7]" /></div><div className="eyebrow text-[9px] text-[#8b7cc0]">Ready for inquiry</div><h2 className="mt-3 text-[20px] font-semibold text-[#e4e5ef]">Your evidence panel is waiting</h2><p className="mt-2 max-w-[360px] text-[12px] leading-6 text-[#828da3]">Submit two interests and a planning context. Returned evidence will appear here with its source and confidence level.</p></div>}
           {discoveryEvidence.status === 'loading' && <div className="space-y-3"><Skeleton className="h-28" /><Skeleton className="h-48" /><Skeleton className="h-48" /></div>}
           {discoveryEvidence.status === 'error' && <ErrorNotice title="We couldn’t complete this comparison" onRetry={() => requestDiscovery(form)} />}
-          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={(candidate) => dispatchDiscoveryEvidence({ type: 'candidate-selected', candidate })} onSave={saveResult} onPlan={makePlan} saving={save.isPending} savedMessage={savedMessage} />}
+          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={(candidate) => dispatchDiscoveryEvidence({ type: 'candidate-selected', candidate })} onSave={saveResult} onPlan={makePlan} saving={save.isPending} saveFeedback={saveFeedback} />}
         </section>
       </div>
     </div>
@@ -419,10 +425,10 @@ function Field({ label, required, children }: { label: string; required?: boolea
   return <label className="block"><span className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-[#a8b0c1]">{label}{required && <span className="text-[#c69aff]">*</span>}</span>{children}</label>;
 }
 
-function Results({ response, city, interestA, interestB, recommendationType, selected, onSelect, onSave, onPlan, saving, savedMessage }: {
+function Results({ response, city, interestA, interestB, recommendationType, selected, onSelect, onSave, onPlan, saving, saveFeedback }: {
   response: DiscoveryResponse; city: string; interestA: string; interestB: string; recommendationType: DiscoveryInputRecommendationType | undefined; selected: BridgeCandidate | null;
   onSelect: (candidate: BridgeCandidate | null) => void; onSave: (candidate: BridgeCandidate) => void;
-  onPlan: (candidate: BridgeCandidate) => void; saving: boolean; savedMessage: string;
+  onPlan: (candidate: BridgeCandidate) => void; saving: boolean; saveFeedback: MutationFeedback;
 }) {
   const candidates = response.candidates ?? [];
   return <div className="space-y-4 page-in">
@@ -478,7 +484,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[.06] px-5 py-3"><span className="text-[9px] text-[#717d93]">Score is derived, not a direct measure of audience size.</span><div className="flex gap-1"><Button variant="quiet" className="text-[10px]" onClick={() => onSave(candidate)} disabled={saving}><Bookmark size={13} />{saving ? 'Saving…' : 'Save discovery'}</Button><Button variant="outline" className="text-[10px]" onClick={() => onPlan(candidate)}><FileText size={13} />Build plan</Button></div></div>
         </article>;
     })}
-    {savedMessage && <div className="text-[11px] text-emerald-200"><Check size={13} className="mr-1 inline" />{savedMessage}</div>}
+    {saveFeedback && <div role={saveFeedback.type === 'error' ? 'alert' : 'status'} className={cx('text-[11px]', saveFeedback.type === 'error' ? 'text-rose-200' : 'text-emerald-200')}>{saveFeedback.type === 'success' && <Check size={13} className="mr-1 inline" />}{saveFeedback.message}</div>}
   </div>;
 }
 
@@ -585,6 +591,7 @@ function PlansPage() {
   const plansQuery = useListActivationPlans<ActivationPlan[]>();
   const savePlan = useSaveActivationPlan();
   const deletePlan = useDeleteActivationPlan();
+  const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
   const [draft, setDraft] = useState<{ form: DiscoveryInput; candidate: BridgeCandidate; response: DiscoveryResponse } | null>(() => {
     try { const raw = sessionStorage.getItem('atlas:draft-plan'); return raw ? JSON.parse(raw) : null; } catch { return null; }
   });
@@ -619,6 +626,18 @@ function PlansPage() {
       onError: () => setSaveError(true),
     });
   };
+  const removePlan = (plan: ActivationPlan) => {
+    if (!window.confirm(`Delete “${plan.title}” from saved plans?`)) return;
+    dispatchDeleteFeedback({ type: 'clear' });
+    deletePlan.mutate({ id: plan.id }, {
+      onSuccess: () => {
+        dispatchDeleteFeedback({ type: 'clear' });
+        qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() });
+      },
+      onError: () => dispatchDeleteFeedback({ type: 'error', message: 'Could not delete the activation plan. Please try again.' }),
+    });
+  };
   const exportPlan = (plan: ActivationPlan | null) => {
     const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: planContent } : null;
     if (!payload) return;
@@ -638,7 +657,8 @@ function PlansPage() {
       <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
     </div>}
     <Panel><div className="mb-4 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#78849a]">Workspace library</div><h2 className="mt-1 text-[16px] font-semibold">Saved activation plans</h2></div><span className="mono rounded-md border border-white/[.08] px-2 py-1 text-[9px] text-[#7c879c]">{plansQuery.data?.length ?? '—'} plans</span></div>
-      {plansQuery.isLoading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : plansQuery.isError ? <ErrorNotice title="Saved plans could not be loaded" onRetry={() => plansQuery.refetch()} /> : !plansQuery.data?.length ? <div className="rounded-xl border border-dashed border-white/[.1] px-5 py-10 text-center"><FileText size={22} className="mx-auto text-[#727f95]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">{draft ? 'Your first plan is ready to save' : 'No saved plans yet'}</h3><p className="mx-auto mt-1 max-w-[400px] text-[10px] leading-5 text-[#7b879c]">{draft ? 'Give the brief a title above, then save it to the workspace library.' : 'Choose “Build plan” on a discovery bridge to create a clearly labeled working brief.'}</p></div> : <div className="space-y-2">{plansQuery.data.map((plan) => <PlanRow key={plan.id} plan={plan} onExport={() => exportPlan(plan)} onDelete={() => { if (window.confirm(`Delete “${plan.title}” from saved plans?`)) deletePlan.mutate({ id: plan.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); } }); }} deleting={deletePlan.isPending} />)}</div>}
+      {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}
+      {plansQuery.isLoading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : plansQuery.isError ? <ErrorNotice title="Saved plans could not be loaded" onRetry={() => plansQuery.refetch()} /> : !plansQuery.data?.length ? <div className="rounded-xl border border-dashed border-white/[.1] px-5 py-10 text-center"><FileText size={22} className="mx-auto text-[#727f95]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">{draft ? 'Your first plan is ready to save' : 'No saved plans yet'}</h3><p className="mx-auto mt-1 max-w-[400px] text-[10px] leading-5 text-[#7b879c]">{draft ? 'Give the brief a title above, then save it to the workspace library.' : 'Choose “Build plan” on a discovery bridge to create a clearly labeled working brief.'}</p></div> : <div className="space-y-2">{plansQuery.data.map((plan) => <PlanRow key={plan.id} plan={plan} onExport={() => exportPlan(plan)} onDelete={() => removePlan(plan)} deleting={deletePlan.isPending} />)}</div>}
     </Panel>
   </div>;
 }
@@ -651,11 +671,25 @@ function SavedPage() {
   const qc = useQueryClient();
   const query = useListSavedDiscoveries<SavedDiscovery[]>();
   const deletion = useDeleteSavedDiscovery();
+  const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const removeDiscovery = (item: SavedDiscovery) => {
+    if (!window.confirm(`Delete “${item.title}” from saved discoveries?`)) return;
+    dispatchDeleteFeedback({ type: 'clear' });
+    deletion.mutate({ id: item.id }, {
+      onSuccess: () => {
+        dispatchDeleteFeedback({ type: 'clear' });
+        qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() });
+      },
+      onError: () => dispatchDeleteFeedback({ type: 'error', message: 'Could not delete the saved discovery. Please try again.' }),
+    });
+  };
   return <div className="page-in">
     <PageTitle kicker="04 / evidence library" title="Saved Discoveries" detail="A durable record of comparisons worth returning to. Each item keeps its returned result and source caveat together." right={<Link href="/discover" className="inline-flex items-center gap-2 rounded-[10px] border border-white/[.12] px-3.5 py-2.5 text-[11px] font-semibold text-[#c4cada] hover:bg-white/[.04]"><Plus size={14} />New discovery</Link>} />
     <Panel>
-      {query.isLoading ? <div className="space-y-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : query.isError ? <ErrorNotice title="Saved discoveries could not be loaded" onRetry={() => query.refetch()} /> : !query.data?.length ? <div className="px-4 py-14 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-violet-100/10 bg-violet-100/[.035] text-[#ab99ec]"><Bookmark size={19} /></div><h2 className="mt-4 text-[15px] font-semibold">Your evidence trail starts here</h2><p className="mx-auto mt-2 max-w-[390px] text-[11px] leading-5 text-[#818ca1]">Run a comparison in Discovery Studio and save a result to build a searchable library. Empty is empty—no starter records are inserted.</p><Link href="/discover" className="mt-5 inline-flex items-center gap-2 rounded-[10px] bg-[#a58df3] px-4 py-2.5 text-[11px] font-bold text-[#171322]">Open Discovery Studio <ArrowRight size={14} /></Link></div> : <div className="space-y-3">{query.data.map((item) => <SavedCard key={item.id} item={item} expanded={expanded === item.id} onExpand={() => setExpanded(expanded === item.id ? null : item.id)} onDelete={() => { if (window.confirm(`Delete “${item.title}” from saved discoveries?`)) deletion.mutate({ id: item.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); } }); }} deleting={deletion.isPending} />)}</div>}
+      {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}
+      {query.isLoading ? <div className="space-y-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : query.isError ? <ErrorNotice title="Saved discoveries could not be loaded" onRetry={() => query.refetch()} /> : !query.data?.length ? <div className="px-4 py-14 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-violet-100/10 bg-violet-100/[.035] text-[#ab99ec]"><Bookmark size={19} /></div><h2 className="mt-4 text-[15px] font-semibold">Your evidence trail starts here</h2><p className="mx-auto mt-2 max-w-[390px] text-[11px] leading-5 text-[#818ca1]">Run a comparison in Discovery Studio and save a result to build a searchable library. Empty is empty—no starter records are inserted.</p><Link href="/discover" className="mt-5 inline-flex items-center gap-2 rounded-[10px] bg-[#a58df3] px-4 py-2.5 text-[11px] font-bold text-[#171322]">Open Discovery Studio <ArrowRight size={14} /></Link></div> : <div className="space-y-3">{query.data.map((item) => <SavedCard key={item.id} item={item} expanded={expanded === item.id} onExpand={() => setExpanded(expanded === item.id ? null : item.id)} onDelete={() => removeDiscovery(item)} deleting={deletion.isPending} />)}</div>}
     </Panel>
   </div>;
 }
