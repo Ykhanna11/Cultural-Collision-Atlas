@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useMemo, useState } from 'react';
+import { type FormEvent, type ReactNode, useMemo, useReducer, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
@@ -20,6 +20,11 @@ import type {
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
+import {
+  discoveryEvidenceReducer,
+  initialDiscoveryEvidenceState,
+  nextDiscoveryRequestId,
+} from '@/lib/discovery-state';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
@@ -258,8 +263,11 @@ function recommendationCategoryLabel(value: DiscoveryInputRecommendationType | u
 function DiscoveryPage() {
   const [, setLocation] = useLocation();
   const [form, setForm] = useState<DiscoveryInput>(defaultForm);
-  const [response, setResponse] = useState<DiscoveryResponse | null>(null);
-  const [selected, setSelected] = useState<BridgeCandidate | null>(null);
+  const [discoveryEvidence, dispatchDiscoveryEvidence] = useReducer(
+    discoveryEvidenceReducer,
+    initialDiscoveryEvidenceState,
+  );
+  const { response, selected } = discoveryEvidence;
   const [savedMessage, setSavedMessage] = useState('');
   const [entitySide, setEntitySide] = useState<'a' | 'b' | null>(null);
   const [entityText, setEntityText] = useState('');
@@ -272,14 +280,49 @@ function DiscoveryPage() {
   const save = useSaveDiscovery();
   const qc = useQueryClient();
   const status = useGetQlooStatus();
+  const discoveryRequestId = useRef(0);
   const change = (key: keyof DiscoveryInput, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
   const canDiscover = !!form.interestA.trim() && !!form.interestB.trim() && !!form.interestAId.trim() && !!form.interestBId.trim() && !!form.city.trim() && !!form.cityEntityId && !!form.budgetRange.trim() && !!form.objective.trim();
+  const invalidateDiscovery = (side?: 'a' | 'b') => {
+    const requestId = (discoveryRequestId.current = nextDiscoveryRequestId(discoveryRequestId.current));
+    dispatchDiscoveryEvidence(
+      side
+        ? { type: 'interest-changed', side, requestId }
+        : { type: 'request-invalidated', requestId },
+    );
+  };
+  const changeInterest = (side: 'a' | 'b', value: string, entityId = '') => {
+    invalidateDiscovery(side);
+    discover.reset();
+    search.reset();
+    setEntitySide(null);
+    setEntityText('');
+    setSavedMessage('');
+    setForm((previous) => side === 'a'
+      ? { ...previous, interestA: value, interestAId: entityId }
+      : { ...previous, interestB: value, interestBId: entityId });
+  };
+  const requestDiscovery = (input: DiscoveryInput) => {
+    const requestId = (discoveryRequestId.current = nextDiscoveryRequestId(discoveryRequestId.current));
+    dispatchDiscoveryEvidence({ type: 'request-started', requestId });
+    discover.mutate({ data: input }, {
+      onSuccess: (result) => {
+        dispatchDiscoveryEvidence({
+          type: 'response-received',
+          requestId,
+          response: result,
+        });
+      },
+      onError: () => {
+        dispatchDiscoveryEvidence({ type: 'request-failed', requestId });
+      },
+    });
+  };
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!canDiscover) return;
     setSavedMessage('');
-    setSelected(null);
-    discover.mutate({ data: form }, { onSuccess: (result) => setResponse(result), onError: () => setResponse(null) });
+    requestDiscovery(form);
   };
   const searchEntity = (side: 'a' | 'b') => {
     const query = side === 'a' ? form.interestA : form.interestB;
@@ -299,8 +342,7 @@ function DiscoveryPage() {
     setLocalityQuery(query);
     setSelectedLocality(null);
     setForm((previous) => ({ ...previous, cityEntityId: undefined }));
-    setResponse(null);
-    setSelected(null);
+    invalidateDiscovery();
     discover.reset();
     localitySearch.mutate({ data: { query, types: ['urn:entity:locality'] } });
   };
@@ -309,8 +351,7 @@ function DiscoveryPage() {
     setSelectedLocality(null);
     setLocalityQuery('');
     localitySearch.reset();
-    setResponse(null);
-    setSelected(null);
+    invalidateDiscovery();
   };
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
@@ -331,43 +372,43 @@ function DiscoveryPage() {
           <div className="mb-5 flex items-start justify-between"><div><div className="eyebrow text-[9px] text-[#8c80bf]">Comparison brief</div><h2 className="mt-1 text-[16px] font-semibold">Define your inputs</h2></div><span className="mono rounded-md border border-white/[.09] px-2 py-1 text-[9px] text-[#788398]">01—07</span></div>
           <form onSubmit={submit} className="space-y-4">
             <div className="grid grid-cols-[1fr_26px_1fr] items-end gap-2">
-              <Field label="Cultural interest A" required><input className="field" maxLength={120} value={form.interestA} onChange={(e) => { change('interestA', e.target.value); change('interestAId', ''); setEntitySide(null); }} placeholder="e.g. interest or entity" data-testid="input-interest-a" /></Field>
+              <Field label="Cultural interest A" required><input className="field" maxLength={120} value={form.interestA} onChange={(e) => changeInterest('a', e.target.value)} placeholder="e.g. interest or entity" data-testid="input-interest-a" /></Field>
               <div className="mb-3 flex justify-center text-[#8170c9]"><ArrowLeftRight size={15} /></div>
-              <Field label="Cultural interest B" required><input className="field" maxLength={120} value={form.interestB} onChange={(e) => { change('interestB', e.target.value); change('interestBId', ''); setEntitySide(null); }} placeholder="Second interest" data-testid="input-interest-b" /></Field>
+              <Field label="Cultural interest B" required><input className="field" maxLength={120} value={form.interestB} onChange={(e) => changeInterest('b', e.target.value)} placeholder="Second interest" data-testid="input-interest-b" /></Field>
             </div>
             <div className="flex justify-between gap-2">
               <Button type="button" variant="quiet" className="px-0 text-[10px]" onClick={() => searchEntity('a')} disabled={!form.interestA.trim() || search.isPending}><Search size={12} />Search catalog A</Button>
               <Button type="button" variant="quiet" className="px-0 text-[10px]" onClick={() => searchEntity('b')} disabled={!form.interestB.trim() || search.isPending}><Search size={12} />Search catalog B</Button>
             </div>
             <Field label="Optional catalog category"><select className="field" value={entitySearchType} onChange={(event) => { setEntitySearchType(event.target.value as EntitySearchType | ''); setEntitySide(null); }} data-testid="select-entity-search-type"><option value="">Any category</option>{entitySearchTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></Field>
-            <Field label="Recommendation category"><select className="field" value={form.recommendationType ?? 'urn:entity:brand'} disabled={discover.isPending} onChange={(event) => { const category = recommendationCategories.find(({ value }) => value === event.target.value); if (category) { change('recommendationType', category.value); setResponse(null); setSelected(null); discover.reset(); } }} data-testid="select-recommendation-category">{recommendationCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select></Field>
+            <Field label="Recommendation category"><select className="field" value={form.recommendationType ?? 'urn:entity:brand'} disabled={discoveryEvidence.status === 'loading'} onChange={(event) => { const category = recommendationCategories.find(({ value }) => value === event.target.value); if (category) { change('recommendationType', category.value); invalidateDiscovery(); discover.reset(); } }} data-testid="select-recommendation-category">{recommendationCategories.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select></Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Entity ID · A" required><input className="field mono text-[10px]" value={form.interestAId} readOnly placeholder="Select catalog result" data-testid="input-entity-a-id" /></Field>
               <Field label="Entity ID · B" required><input className="field mono text-[10px]" value={form.interestBId} readOnly placeholder="Select catalog result" data-testid="input-entity-b-id" /></Field>
             </div>
             {search.isPending && <div className="rounded-lg border border-white/[.08] p-3 text-[10px] text-[#8d98ad]"><LoaderCircle className="mr-2 inline animate-spin" size={12} />Searching connected entity catalog…</div>}
-            {search.data && entitySide && entityText === (entitySide === 'a' ? form.interestA : form.interestB) && <div className="rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-3"><div className="mb-2 flex items-center justify-between text-[10px] text-[#a9e5ea]">Catalog results for “{entityText}”<button onClick={() => { setEntitySide(null); }} type="button" aria-label="Dismiss catalog results"><X size={13} /></button></div>{search.data.entities.length ? <div className="space-y-1">{search.data.entities.map((entity) => <button type="button" key={entity.id} onClick={() => { if (entitySide === 'a') { change('interestA', entity.name); change('interestAId', entity.id); } if (entitySide === 'b') { change('interestB', entity.name); change('interestBId', entity.id); } setEntitySide(null); }} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]"><span className="flex w-full items-start justify-between gap-3"><span className="min-w-0 text-[11px] text-[#d7dce8]">{entity.name}<span className="mt-0.5 block mono text-[8px] text-[#778398]">{entity.id}</span></span><span className="shrink-0 text-right text-[9px] text-[#aab8ca]">{entity.type ?? 'Type unavailable'}{entity.subtype && <span className="block text-[8px] text-[#8d9bae]">Subtype: {entity.subtype}</span>}</span></span>{entity.description && <span className="line-clamp-2 pr-1 text-[9px] leading-4 text-[#8e9bb0]">{entity.description}</span>}</button>)}</div> : <div className="text-[10px] text-[#818ca1]">No matching entities returned.</div>}</div>}
+            {search.data && entitySide && entityText === (entitySide === 'a' ? form.interestA : form.interestB) && <div className="rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-3"><div className="mb-2 flex items-center justify-between text-[10px] text-[#a9e5ea]">Catalog results for “{entityText}”<button onClick={() => { setEntitySide(null); }} type="button" aria-label="Dismiss catalog results"><X size={13} /></button></div>{search.data.entities.length ? <div className="space-y-1">{search.data.entities.map((entity) => <button type="button" key={entity.id} onClick={() => { if (entitySide === 'a') changeInterest('a', entity.name, entity.id); if (entitySide === 'b') changeInterest('b', entity.name, entity.id); }} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]"><span className="flex w-full items-start justify-between gap-3"><span className="min-w-0 text-[11px] text-[#d7dce8]">{entity.name}<span className="mt-0.5 block mono text-[8px] text-[#778398]">{entity.id}</span></span><span className="shrink-0 text-right text-[9px] text-[#aab8ca]">{entity.type ?? 'Type unavailable'}{entity.subtype && <span className="block text-[8px] text-[#8d9bae]">Subtype: {entity.subtype}</span>}</span></span>{entity.description && <span className="line-clamp-2 pr-1 text-[9px] leading-4 text-[#8e9bb0]">{entity.description}</span>}</button>)}</div> : <div className="text-[10px] text-[#818ca1]">No matching entities returned.</div>}</div>}
             {search.isError && <div className="text-[10px] text-rose-200/80">Catalog search unavailable. Check the Qloo connection in settings.</div>}
-            <Field label="City" required><div className="flex gap-2"><div className="relative min-w-0 flex-1"><MapPin size={14} className="absolute left-3 top-3.5 text-[#707b92]" /><input className="field pl-9" maxLength={120} value={form.city} onChange={(e) => changeCity(e.target.value)} placeholder="Where should this live?" data-testid="input-city" disabled={discover.isPending} /></div><Button type="button" variant="outline" className="shrink-0 px-2" onClick={searchCityLocalities} disabled={!form.city.trim() || localitySearch.isPending || discover.isPending} aria-label="Search Qloo city localities">{localitySearch.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}</Button></div></Field>
+            <Field label="City" required><div className="flex gap-2"><div className="relative min-w-0 flex-1"><MapPin size={14} className="absolute left-3 top-3.5 text-[#707b92]" /><input className="field pl-9" maxLength={120} value={form.city} onChange={(e) => changeCity(e.target.value)} placeholder="Where should this live?" data-testid="input-city" disabled={discoveryEvidence.status === 'loading'} /></div><Button type="button" variant="outline" className="shrink-0 px-2" onClick={searchCityLocalities} disabled={!form.city.trim() || localitySearch.isPending || discoveryEvidence.status === 'loading'} aria-label="Search Qloo city localities">{localitySearch.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}</Button></div></Field>
             <p className="-mt-2 text-[9px] leading-4 text-[#78849a]">Search and select the intended Qloo city entity. Ambiguous matches are never selected automatically.</p>
             {selectedLocality && <div className="rounded-lg border border-cyan-100/10 bg-cyan-100/[.025] px-3 py-2 text-[9px] leading-4 text-[#a8dfe3]">Selected Qloo locality: <b>{selectedLocality.name}</b>{selectedLocality.placeType && ` · ${selectedLocality.placeType}`}{selectedLocality.administrativeLevel != null && ` · admin level ${selectedLocality.administrativeLevel}`}<span className="mono mt-1 block break-all text-[#8c9db0]">{selectedLocality.id}</span></div>}
             {localitySearch.isPending && <div className="rounded-lg border border-white/[.08] p-3 text-[10px] text-[#8d98ad]"><LoaderCircle className="mr-2 inline animate-spin" size={12} />Searching Qloo city localities…</div>}
-            {localitySearch.data && localityQuery === form.city.trim() && <div className="max-h-48 space-y-1 overflow-auto rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-2" role="listbox" aria-label="Qloo city locality results">{localitySearch.data.entities.length ? localitySearch.data.entities.map((entity) => <button key={entity.id} type="button" role="option" aria-selected={form.cityEntityId === entity.id} disabled={entity.placeType !== 'city' || discover.isPending} onClick={() => { setSelectedLocality(entity); setForm((previous) => ({ ...previous, cityEntityId: entity.id })); setResponse(null); setSelected(null); }} className={cx('w-full rounded-lg px-2 py-2 text-left hover:bg-white/[.05] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent', form.cityEntityId === entity.id && 'bg-cyan-100/[.06]')}><span className="flex items-start justify-between gap-2"><span className="text-[10px] font-semibold text-[#d8e0ec]">{entity.name}</span><span className="shrink-0 text-[8px] text-[#aab8ca]">{entity.placeType ?? 'Place type unavailable'}{entity.administrativeLevel != null && ` · admin ${entity.administrativeLevel}`}</span></span>{entity.ancestorNames?.length ? <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestors: {entity.ancestorNames.join(' · ')}</span> : <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestor context unavailable</span>}<span className="mono mt-1 block break-all text-[8px] text-[#718096]">{entity.id}</span>{entity.placeType !== 'city' && <span className="mt-1 block text-[8px] text-[#be9d73]">Not selectable: choose a city-level result.</span>}</button>) : <div className="px-2 py-3 text-[10px] text-[#818ca1]">No locality results returned. Try a more specific city query.</div>}</div>}
+            {localitySearch.data && localityQuery === form.city.trim() && <div className="max-h-48 space-y-1 overflow-auto rounded-xl border border-cyan-100/10 bg-cyan-200/[.025] p-2" role="listbox" aria-label="Qloo city locality results">{localitySearch.data.entities.length ? localitySearch.data.entities.map((entity) => <button key={entity.id} type="button" role="option" aria-selected={form.cityEntityId === entity.id} disabled={entity.placeType !== 'city' || discoveryEvidence.status === 'loading'} onClick={() => { setSelectedLocality(entity); setForm((previous) => ({ ...previous, cityEntityId: entity.id })); invalidateDiscovery(); }} className={cx('w-full rounded-lg px-2 py-2 text-left hover:bg-white/[.05] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent', form.cityEntityId === entity.id && 'bg-cyan-100/[.06]')}><span className="flex items-start justify-between gap-2"><span className="text-[10px] font-semibold text-[#d8e0ec]">{entity.name}</span><span className="shrink-0 text-[8px] text-[#aab8ca]">{entity.placeType ?? 'Place type unavailable'}{entity.administrativeLevel != null && ` · admin ${entity.administrativeLevel}`}</span></span>{entity.ancestorNames?.length ? <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestors: {entity.ancestorNames.join(' · ')}</span> : <span className="mt-1 block text-[9px] text-[#8795aa]">Ancestor context unavailable</span>}<span className="mono mt-1 block break-all text-[8px] text-[#718096]">{entity.id}</span>{entity.placeType !== 'city' && <span className="mt-1 block text-[8px] text-[#be9d73]">Not selectable: choose a city-level result.</span>}</button>) : <div className="px-2 py-3 text-[10px] text-[#818ca1]">No locality results returned. Try a more specific city query.</div>}</div>}
             {localitySearch.isError && <div className="text-[10px] text-rose-200/80">Qloo locality search failed; no city was selected.</div>}
             <Field label="Activation type" required><div className="relative"><select className="field appearance-none pr-9" value={form.activationType} onChange={(e) => change('activationType', e.target.value)} data-testid="select-activation-type"><option value="pop-up">Pop-up</option><option value="live_event">Live event</option><option value="brand_collaboration">Brand collaboration</option><option value="retail_experience">Retail experience</option><option value="community_event">Community event</option></select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-3.5 text-[#758097]" /></div></Field>
             <Field label="Budget range" required><input className="field" maxLength={80} value={form.budgetRange} onChange={(e) => change('budgetRange', e.target.value)} placeholder="e.g. $25k–$50k" data-testid="input-budget-range" /></Field>
             <Field label="Objective" required><textarea className="field min-h-[76px] resize-y" maxLength={300} value={form.objective} onChange={(e) => change('objective', e.target.value)} placeholder="What should the activation change or prove?" data-testid="input-objective" /></Field>
             <Field label="Audience context"><textarea className="field min-h-[66px] resize-y" maxLength={500} value={form.audienceDescription} onChange={(e) => change('audienceDescription', e.target.value)} placeholder="Optional: who are you hoping to reach?" data-testid="input-audience" /></Field>
-            {discover.isError && <ErrorNotice title="Bridge discovery failed" />}
+            {discoveryEvidence.status === 'error' && <ErrorNotice title="Bridge discovery failed" />}
             {!status.data?.configured && <div className="rounded-lg border border-amber-200/15 bg-amber-100/[.04] px-3 py-2.5 text-[10px] leading-5 text-amber-100/75">Qloo is not configured. Discovery will return its explicit setup response; recommendations are never simulated. <Link href="/settings" className="ml-1 text-amber-100 underline underline-offset-2">Review settings</Link></div>}
-            <Button type="submit" variant="primary" className="w-full py-3" disabled={!canDiscover || discover.isPending} data-testid="button-discover-bridges">{discover.isPending ? <><LoaderCircle size={15} className="animate-spin" />Reading signal…</> : <><Sparkles size={15} />Find cultural bridges</>}</Button>
+            <Button type="submit" variant="primary" className="w-full py-3" disabled={!canDiscover || discoveryEvidence.status === 'loading'} data-testid="button-discover-bridges">{discoveryEvidence.status === 'loading' ? <><LoaderCircle size={15} className="animate-spin" />Reading signal…</> : <><Sparkles size={15} />Find cultural bridges</>}</Button>
           </form>
         </Panel>
         <section className="min-w-0">
-          {!response && !discover.isPending && !discover.isError && <div className="surface flex min-h-[475px] flex-col items-center justify-center rounded-2xl px-6 text-center"><div className="relative mb-6 flex h-[90px] w-[90px] items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.04]"><div className="absolute inset-3 rounded-full border border-cyan-200/10" /><Waypoints size={27} className="text-[#a890f2]" /><span className="absolute right-1 top-4 h-2 w-2 rounded-full bg-[#70dce7]" /></div><div className="eyebrow text-[9px] text-[#8b7cc0]">Ready for inquiry</div><h2 className="mt-3 text-[20px] font-semibold text-[#e4e5ef]">Your evidence panel is waiting</h2><p className="mt-2 max-w-[360px] text-[12px] leading-6 text-[#828da3]">Submit two interests and a planning context. Returned evidence will appear here with its source and confidence level.</p></div>}
-          {discover.isPending && <div className="space-y-3"><Skeleton className="h-28" /><Skeleton className="h-48" /><Skeleton className="h-48" /></div>}
-          {discover.isError && <ErrorNotice title="We couldn’t complete this comparison" onRetry={() => discover.mutate({ data: form }, { onSuccess: setResponse })} />}
-          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={setSelected} onSave={saveResult} onPlan={makePlan} saving={save.isPending} savedMessage={savedMessage} />}
+          {!response && discoveryEvidence.status === 'idle' && <div className="surface flex min-h-[475px] flex-col items-center justify-center rounded-2xl px-6 text-center"><div className="relative mb-6 flex h-[90px] w-[90px] items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.04]"><div className="absolute inset-3 rounded-full border border-cyan-200/10" /><Waypoints size={27} className="text-[#a890f2]" /><span className="absolute right-1 top-4 h-2 w-2 rounded-full bg-[#70dce7]" /></div><div className="eyebrow text-[9px] text-[#8b7cc0]">Ready for inquiry</div><h2 className="mt-3 text-[20px] font-semibold text-[#e4e5ef]">Your evidence panel is waiting</h2><p className="mt-2 max-w-[360px] text-[12px] leading-6 text-[#828da3]">Submit two interests and a planning context. Returned evidence will appear here with its source and confidence level.</p></div>}
+          {discoveryEvidence.status === 'loading' && <div className="space-y-3"><Skeleton className="h-28" /><Skeleton className="h-48" /><Skeleton className="h-48" /></div>}
+          {discoveryEvidence.status === 'error' && <ErrorNotice title="We couldn’t complete this comparison" onRetry={() => requestDiscovery(form)} />}
+          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={(candidate) => dispatchDiscoveryEvidence({ type: 'candidate-selected', candidate })} onSave={saveResult} onPlan={makePlan} saving={save.isPending} savedMessage={savedMessage} />}
         </section>
       </div>
     </div>
