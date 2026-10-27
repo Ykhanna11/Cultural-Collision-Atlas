@@ -27,7 +27,7 @@ The API binds to the runtime `PORT` supplied by the host. In production it expec
 
 Create one **Web Service** from the repository root. A suitable build command is `pnpm install --frozen-lockfile && pnpm run build`; use `pnpm --filter @workspace/api-server run start` as the start command. Set `NODE_ENV=production`; allow Render to provide the runtime `PORT`. `AUTH_BASE_URL` must be set to the service's actual public HTTPS origin without a path. Configure a health check at `/api/healthz`.
 
-Store `DATABASE_URL`, `GOOGLE_OIDC_CLIENT_SECRET`, `AUTH_SESSION_SECRET`, and (if used) `QLOO_API_KEY` as server-side secrets. Set `GOOGLE_OIDC_CLIENT_ID`, `AUTH_BASE_URL`, and `AUTH_ALLOWED_EMAILS` as API runtime environment values, not Vite/browser variables. `AUTH_SESSION_SECRET` must contain at least 32 bytes and remain stable across restarts. The API fails startup if required auth configuration or `DATABASE_URL` is missing.
+Store `DATABASE_URL`, `GOOGLE_OIDC_CLIENT_SECRET`, `AUTH_SESSION_SECRET`, and (if used) `QLOO_API_KEY` and `OPENAI_API_KEY` as server-side secrets. Set `GOOGLE_OIDC_CLIENT_ID`, `AUTH_BASE_URL`, `AUTH_ALLOWED_EMAILS`, and (if using AI planning) `OPENAI_MODEL` as API runtime environment values, not Vite/browser variables. Choose a model identifier that is enabled for the account; the application does not assume a default. `AUTH_SESSION_SECRET` must contain at least 32 bytes and remain stable across restarts. The API fails startup if required auth configuration or `DATABASE_URL` is missing.
 
 Register the Google Web application redirect URI exactly as `${AUTH_BASE_URL}/api/auth/callback` after the actual Render service URL is assigned. The app requires HTTPS in production and configures Secure, HttpOnly, SameSite=Lax session cookies. Express trusts one proxy hop; verify in staging that Render's forwarded protocol and proxy topology support secure cookie issuance before opening access.
 
@@ -74,6 +74,7 @@ Configure these values on the **API server** before starting the authentication-
 - `PORT`: valid positive port for the API server.
 - `NODE_ENV=production`: use this for production-mode staging over HTTPS; it enables Secure session cookies and the `__Host-` cookie name.
 - `QLOO_API_KEY` is optional for auth/session-only checks, but must be configured on the API server to test live Qloo discovery and heatmap integrations.
+- `OPENAI_API_KEY` and `OPENAI_MODEL` are optional for deterministic planning; both must be configured on the API server to enable AI-assisted planning. The model identifier is account-dependent, and neither value is sent to the browser. Each Responses API decision is capped at 1,200 output tokens.
 
 Google Cloud setup: configure the OAuth consent screen and (while in testing mode) add the intended test accounts. Create an OAuth client of type **Web application** and register this Authorized redirect URI exactly: `${AUTH_BASE_URL}/api/auth/callback` (the code appends the fixed path `/api/auth/callback` to the configured origin). Add the resulting client ID/secret to the API server configuration, then set `AUTH_ALLOWED_EMAILS` to the exact approved account addresses. The client secret and session secret must never be included in the web app or browser storage.
 

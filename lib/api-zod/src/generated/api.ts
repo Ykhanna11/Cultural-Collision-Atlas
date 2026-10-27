@@ -355,6 +355,68 @@ export const SaveActivationPlanResponse = zod.object({
 
 
 /**
+ * Uses a bounded server-side OpenAI tool loop with allowlisted Qloo tools. Requires configured OPENAI_API_KEY, OPENAI_MODEL, and Qloo.
+ * @summary Generate an evidence-grounded activation plan
+ */
+export const generateActivationPlanWithAgentBodyInputInterestAMax = 120;
+
+export const generateActivationPlanWithAgentBodyInputInterestBMax = 120;
+
+export const generateActivationPlanWithAgentBodyInputInterestAIdMax = 160;
+
+export const generateActivationPlanWithAgentBodyInputInterestBIdMax = 160;
+
+export const generateActivationPlanWithAgentBodyInputCityMax = 120;
+
+export const generateActivationPlanWithAgentBodyInputBudgetRangeMax = 80;
+
+export const generateActivationPlanWithAgentBodyInputObjectiveMax = 300;
+
+export const generateActivationPlanWithAgentBodyInputAudienceDescriptionMax = 500;
+
+export const generateActivationPlanWithAgentBodyBridgeIdMax = 160;
+
+export const generateActivationPlanWithAgentBodyBridgeNameMax = 160;
+
+
+
+export const GenerateActivationPlanWithAgentBody = zod.object({
+  "input": zod.object({
+  "interestA": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputInterestAMax),
+  "interestB": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputInterestBMax),
+  "interestAId": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputInterestAIdMax),
+  "interestBId": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputInterestBIdMax),
+  "city": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputCityMax),
+  "cityEntityId": zod.string().uuid().optional(),
+  "recommendationType": zod.enum(['urn:entity:brand', 'urn:entity:place', 'urn:entity:destination']).optional(),
+  "activationType": zod.enum(['pop-up', 'live_event', 'brand_collaboration', 'retail_experience', 'community_event']),
+  "budgetRange": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputBudgetRangeMax),
+  "objective": zod.string().min(1).max(generateActivationPlanWithAgentBodyInputObjectiveMax),
+  "audienceDescription": zod.string().max(generateActivationPlanWithAgentBodyInputAudienceDescriptionMax).optional()
+}),
+  "bridgeId": zod.string().min(1).max(generateActivationPlanWithAgentBodyBridgeIdMax),
+  "bridgeName": zod.string().min(1).max(generateActivationPlanWithAgentBodyBridgeNameMax)
+})
+
+export const GenerateActivationPlanWithAgentResponse = zod.object({
+  "source": zod.enum(['openai_qloo_agent']),
+  "caveat": zod.string(),
+  "evidenceReferences": zod.array(zod.string()),
+  "hypotheses": zod.array(zod.string()),
+  "assumptions": zod.array(zod.string()),
+  "recommendations": zod.array(zod.string()),
+  "evidence": zod.array(zod.object({
+  "referenceId": zod.string(),
+  "source": zod.enum(['qloo_api']),
+  "kind": zod.enum(['entity_search', 'insights']),
+  "entityId": zod.string(),
+  "name": zod.string(),
+  "details": zod.record(zod.string(), zod.union([zod.string(),zod.number()]).nullable())
+}))
+})
+
+
+/**
  * @summary Delete a saved activation plan
  */
 export const DeleteActivationPlanParams = zod.object({

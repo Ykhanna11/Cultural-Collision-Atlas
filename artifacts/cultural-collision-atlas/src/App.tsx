@@ -10,13 +10,14 @@ import {
   getAtlasOverview, getQlooStatus, getGetAtlasOverviewQueryKey, getGetQlooStatusQueryKey,
   getListActivationPlansQueryKey, getListSavedDiscoveriesQueryKey,
   useDeleteActivationPlan, useDeleteSavedDiscovery, useDiscoverCulturalBridges,
+  useGenerateActivationPlanWithAgent,
   useGetAtlasOverview, useGetOpportunityHeatmap, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
   useSearchQlooEntities, useTestQlooConnection,
   setCsrfToken,
 } from '@workspace/api-client-react';
 import type {
-  ActivationPlan, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
+  ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
   SavedDiscovery,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
@@ -638,6 +639,7 @@ function PlansPage() {
   const qc = useQueryClient();
   const plansQuery = useListActivationPlans<ActivationPlan[]>();
   const savePlan = useSaveActivationPlan();
+  const generateAgentPlan = useGenerateActivationPlanWithAgent();
   const deletePlan = useDeleteActivationPlan();
   const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
   const [draft, setDraft] = useState<ActivationPlanDraft | null>(() => {
@@ -646,6 +648,8 @@ function PlansPage() {
   const [title, setTitle] = useState('');
   const [exported, setExported] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [agentPlan, setAgentPlan] = useState<ActivationPlannerResponse | null>(null);
+  const [agentFallback, setAgentFallback] = useState(false);
   const [expandedPlanId, setExpandedPlanId] = useState<number | null>(null);
   const planContent = useMemo(
     () => (draft ? buildActivationPlanContent(draft) : null),
@@ -655,9 +659,24 @@ function PlansPage() {
     event.preventDefault();
     if (!draft || !planContent || !title.trim()) return;
     setSaveError(false);
-    savePlan.mutate({ data: buildActivationPlanSaveInput(title, draft, planContent) }, {
-      onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); setDraft(null); sessionStorage.removeItem('atlas:draft-plan'); setTitle(''); },
+    savePlan.mutate({ data: buildActivationPlanSaveInput(title, draft, planContent, agentPlan ?? undefined) }, {
+      onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); setTitle(''); },
       onError: () => setSaveError(true),
+    });
+  };
+  const requestAgentPlan = () => {
+    if (!draft) return;
+    setAgentPlan(null);
+    setAgentFallback(false);
+    generateAgentPlan.mutate({
+      data: {
+        input: draft.form,
+        bridgeId: draft.candidate.id,
+        bridgeName: draft.candidate.name,
+      },
+    }, {
+      onSuccess: (result) => setAgentPlan(result),
+      onError: () => setAgentFallback(true),
     });
   };
   const removePlan = (plan: ActivationPlan) => {
@@ -673,7 +692,7 @@ function PlansPage() {
     });
   };
   const exportPlan = (plan: ActivationPlan | null) => {
-    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: planContent } : null;
+    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: agentPlan ? { ...planContent, agent: agentPlan } : planContent } : null;
     if (!payload) return;
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -685,10 +704,30 @@ function PlansPage() {
     <PageTitle kicker="03 / activation planning" title="Activation Planner" detail="Translate an evidence-backed bridge into a reviewable brief. Strategic ideas are clearly identified as hypotheses; budgets remain planning inputs." />
     {draft && planContent && <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <Panel><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#8d7ec3]">Current working brief · hypothesis-led</div><h2 className="mt-1 text-[18px] font-semibold">{draft.candidate.name}</h2><p className="mt-1 text-[11px] text-[#8d98ad]">{draft.form.interestA} × {draft.form.interestB} · {draft.form.city}</p></div><EvidenceKind kind="hypothesis" /></div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/[.07] bg-white/[.02] p-3">
+          <Button variant="outline" type="button" onClick={requestAgentPlan} disabled={generateAgentPlan.isPending}>
+            {generateAgentPlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {generateAgentPlan.isPending ? 'Generating evidence-grounded additions…' : agentPlan ? 'Regenerate AI suggestions' : 'Generate AI suggestions'}
+          </Button>
+          <span role={agentFallback ? 'status' : undefined} className="text-[10px] leading-4 text-[#8994a9]">
+            {agentPlan ? 'AI suggestions generated; Qloo evidence and model hypotheses are shown separately below.' : agentFallback ? 'AI planning is unavailable or failed. The deterministic planner below remains active.' : 'The deterministic planner is active. AI suggestions are optional and require server configuration.'}
+          </span>
+        </div>
+        {agentPlan && <section className="mt-5 space-y-4 rounded-xl border border-cyan-100/10 bg-cyan-100/[.025] p-4">
+          <div>
+            <div className="eyebrow text-[9px] text-cyan-100/70">Observed Qloo evidence · provider results</div>
+            <ul className="mt-2 space-y-2">{agentPlan.evidence.map((item) => <li key={item.referenceId} className="text-[10px] leading-5 text-[#b8c5d5]"><strong>{item.name}</strong> · {item.kind} · ref {item.referenceId}{Object.entries(item.details).map(([key, value]) => <span key={key}> · {key}: {value ?? 'not returned'}</span>)}</li>)}</ul>
+            <p className="mt-3 text-[10px] text-cyan-100/60">References cited by the model: {agentPlan.evidenceReferences.join(', ')}</p>
+          </div>
+          {agentPlan.hypotheses.length > 0 && <div><div className="eyebrow text-[9px] text-amber-100/70">Model-generated hypotheses</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c7b995]">{agentPlan.hypotheses.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
+          {agentPlan.assumptions.length > 0 && <div><div className="eyebrow text-[9px] text-amber-100/70">Model-generated assumptions</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c7b995]">{agentPlan.assumptions.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
+          {agentPlan.recommendations.length > 0 && <div><div className="eyebrow text-[9px] text-violet-100/70">Model-generated recommendations</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c8bddf]">{agentPlan.recommendations.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
+        </section>}
+        {agentPlan && <p className="mt-3 text-[9px] leading-4 text-[#8994a9]">{agentPlan.caveat}</p>}
         <div className="mt-5 grid gap-3 sm:grid-cols-2">{planContent.sections.map((section, i) => <div key={section.title} className="rounded-xl border border-white/[.07] bg-white/[.018] p-4"><div className="eyebrow text-[9px] text-[#8490a6]">0{i + 1} / {section.title}</div><p className="mt-2 text-[11px] leading-5 text-[#b0b9ca]">{section.content}</p></div>)}</div>
         <div className="mt-4 rounded-xl border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]"><strong className="font-semibold text-[#d6c18f]">Planning assumptions</strong><ul className="mt-1 list-disc pl-4">{planContent.assumptions.map((x) => <li key={x}>{x}</li>)}</ul></div>
       </Panel>
-      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
+      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
     </div>}
     <Panel><div className="mb-4 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#78849a]">Workspace library</div><h2 className="mt-1 text-[16px] font-semibold">Saved activation plans</h2></div><span className="mono rounded-md border border-white/[.08] px-2 py-1 text-[9px] text-[#7c879c]">{plansQuery.data?.length ?? '—'} plans</span></div>
       {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}

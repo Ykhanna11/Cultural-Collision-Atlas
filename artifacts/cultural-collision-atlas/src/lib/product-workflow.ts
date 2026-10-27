@@ -2,6 +2,7 @@ import type {
   BridgeCandidate,
   DiscoveryInput,
   DiscoveryResponse,
+  ActivationPlannerResponse,
 } from "@workspace/api-client-react";
 
 export interface ActivationPlanDraft {
@@ -100,7 +101,41 @@ export function buildActivationPlanSaveInput(
   title: string,
   draft: ActivationPlanDraft,
   plan: ReturnType<typeof buildActivationPlanContent>,
+  agentResult?: ActivationPlannerResponse,
 ) {
+  const agentSections = agentResult
+    ? [
+        {
+          title: "Observed Qloo evidence",
+          content: agentResult.evidence
+            .map(({ referenceId, name, kind, details }) =>
+              `${name} (${kind}; ${referenceId})` +
+              (Object.entries(details).length
+                ? `: ${Object.entries(details)
+                    .map(([key, value]) => `${key}=${value ?? "not returned"}`)
+                    .join(", ")}`
+                : ""),
+            )
+            .join("\n"),
+        },
+        {
+          title: "Model-generated hypotheses",
+          content: agentResult.hypotheses.join("\n"),
+        },
+        {
+          title: "Model-generated assumptions",
+          content: agentResult.assumptions.join("\n"),
+        },
+        {
+          title: "Model-generated recommendations",
+          content: agentResult.recommendations.join("\n"),
+        },
+        {
+          title: "AI planning caveat",
+          content: `${agentResult.caveat} Evidence references cited: ${agentResult.evidenceReferences.join(", ")}.`,
+        },
+      ]
+    : [];
   return {
     title,
     city: draft.form.city,
@@ -108,7 +143,13 @@ export function buildActivationPlanSaveInput(
     interestB: draft.form.interestB,
     bridgeName: draft.candidate.name,
     objective: draft.form.objective,
-    plan,
+    plan: agentResult
+      ? {
+          ...plan,
+          sections: [...plan.sections, ...agentSections],
+          agent: agentResult,
+        }
+      : plan,
   };
 }
 

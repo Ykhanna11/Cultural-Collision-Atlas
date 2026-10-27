@@ -7,6 +7,13 @@
  */
 
 export * from './activationPlan';
+export * from './activationPlannerInput';
+export * from './activationPlannerResponse';
+export * from './activationPlannerResponseSource';
+export * from './agentEvidence';
+export * from './agentEvidenceDetails';
+export * from './agentEvidenceKind';
+export * from './agentEvidenceSource';
 export * from './atlasOverview';
 export * from './authSession';
 export * from './authSessionUser';

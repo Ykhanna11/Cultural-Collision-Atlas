@@ -84,6 +84,7 @@ test("the real API keeps health public and rejects protected routes unauthentica
     { method: "DELETE", path: "/discoveries/saved/1" },
     { method: "GET", path: "/activation-plans" },
     { method: "POST", path: "/activation-plans" },
+    { method: "POST", path: "/activation-plans/agent" },
     { method: "DELETE", path: "/activation-plans/1" },
     { method: "POST", path: "/qloo/test" },
     { method: "POST", path: "/qloo/entities/search" },

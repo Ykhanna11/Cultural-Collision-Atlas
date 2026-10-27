@@ -21,6 +21,8 @@ import type {
 
 import type {
   ActivationPlan,
+  ActivationPlannerInput,
+  ActivationPlannerResponse,
   AtlasOverview,
   AuthSession,
   DiscoveryInput,
@@ -1269,6 +1271,95 @@ export const useSaveActivationPlan = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSaveActivationPlanMutationOptions(options));
+    }
+
+export const getGenerateActivationPlanWithAgentUrl = () => {
+
+
+
+
+  return `/api/activation-plans/agent`
+}
+
+/**
+ * Uses a bounded server-side OpenAI tool loop with allowlisted Qloo tools. Requires configured OPENAI_API_KEY, OPENAI_MODEL, and Qloo.
+ * @summary Generate an evidence-grounded activation plan
+ */
+export const generateActivationPlanWithAgent = async (activationPlannerInput: ActivationPlannerInput, options?: Parameters<typeof customFetch>[1]): Promise<ActivationPlannerResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ActivationPlannerResponse>(getGenerateActivationPlanWithAgentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(activationPlannerInput)
+  }
+);}
+
+
+
+
+
+export const getGenerateActivationPlanWithAgentMutationKey = () => ['generateActivationPlanWithAgent'] as const;
+
+export const getGenerateActivationPlanWithAgentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateActivationPlanWithAgent>>, TError,GenerateActivationPlanWithAgentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateActivationPlanWithAgent>>, TError,GenerateActivationPlanWithAgentMutationVariables, TContext> => {
+
+const mutationKey = getGenerateActivationPlanWithAgentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateActivationPlanWithAgent>>, GenerateActivationPlanWithAgentMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateActivationPlanWithAgent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateActivationPlanWithAgentMutationResult = NonNullable<Awaited<ReturnType<typeof generateActivationPlanWithAgent>>>
+    export type GenerateActivationPlanWithAgentMutationBody = BodyType<ActivationPlannerInput>
+    export type GenerateActivationPlanWithAgentMutationError = ErrorType<void>
+    export type GenerateActivationPlanWithAgentMutationVariables = {data: BodyType<ActivationPlannerInput>}
+
+    /**
+ * @summary Generate an evidence-grounded activation plan
+ */
+export const useGenerateActivationPlanWithAgent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateActivationPlanWithAgent>>, TError,GenerateActivationPlanWithAgentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateActivationPlanWithAgent>>,
+        TError,
+        GenerateActivationPlanWithAgentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getGenerateActivationPlanWithAgentMutationOptions(options));
     }
 
 export const getDeleteActivationPlanUrl = (id: number,) => {

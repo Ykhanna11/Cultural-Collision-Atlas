@@ -168,6 +168,63 @@ export interface DiscoveryInput {
   audienceDescription?: string;
 }
 
+export interface ActivationPlannerInput {
+  input: DiscoveryInput;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  bridgeId: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  bridgeName: string;
+}
+
+export type AgentEvidenceSource = typeof AgentEvidenceSource[keyof typeof AgentEvidenceSource];
+
+
+export const AgentEvidenceSource = {
+  qloo_api: 'qloo_api',
+} as const;
+
+export type AgentEvidenceKind = typeof AgentEvidenceKind[keyof typeof AgentEvidenceKind];
+
+
+export const AgentEvidenceKind = {
+  entity_search: 'entity_search',
+  insights: 'insights',
+} as const;
+
+export type AgentEvidenceDetails = {[key: string]: string | number | null};
+
+export interface AgentEvidence {
+  referenceId: string;
+  source: AgentEvidenceSource;
+  kind: AgentEvidenceKind;
+  entityId: string;
+  name: string;
+  details: AgentEvidenceDetails;
+}
+
+export type ActivationPlannerResponseSource = typeof ActivationPlannerResponseSource[keyof typeof ActivationPlannerResponseSource];
+
+
+export const ActivationPlannerResponseSource = {
+  openai_qloo_agent: 'openai_qloo_agent',
+} as const;
+
+export interface ActivationPlannerResponse {
+  source: ActivationPlannerResponseSource;
+  caveat: string;
+  evidenceReferences: string[];
+  hypotheses: string[];
+  assumptions: string[];
+  recommendations: string[];
+  evidence: AgentEvidence[];
+}
+
 export type EvidenceItemKind = typeof EvidenceItemKind[keyof typeof EvidenceItemKind];
 
 

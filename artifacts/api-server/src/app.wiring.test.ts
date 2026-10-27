@@ -14,6 +14,8 @@ process.env.DATABASE_URL = "postgres://local-test:unused@127.0.0.1:1/test";
 process.env.GOOGLE_OIDC_CLIENT_ID = "local-test-client";
 process.env.GOOGLE_OIDC_CLIENT_SECRET = "local-test-client-secret";
 delete process.env.QLOO_API_KEY;
+delete process.env.OPENAI_API_KEY;
+delete process.env.OPENAI_MODEL;
 
 const [{ createApp }, { default: router }] = await Promise.all([
   import("./app.ts"),
@@ -130,6 +132,16 @@ test("real API wiring rejects unauthenticated access and enforces CSRF", async (
   });
   assert.equal(unauthenticatedMutation.status, 401);
 
+  const unauthenticatedAgentMutation = await fetch(
+    `${baseUrl}/activation-plans/agent`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  );
+  assert.equal(unauthenticatedAgentMutation.status, 401);
+
   const seededSession = await fetch(
     `${baseUrl.replace(/\/api$/, "")}/__test/session`,
   );
@@ -160,6 +172,50 @@ test("real API wiring rejects unauthenticated access and enforces CSRF", async (
     ).status,
     403,
   );
+
+  const agentMutation = (headers: Record<string, string>) =>
+    fetch(`${baseUrl}/activation-plans/agent`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        origin: "https://atlas.test",
+        ...headers,
+      },
+      body: "{}",
+    });
+  assert.equal((await agentMutation({})).status, 403);
+  assert.equal(
+    (await agentMutation({ "x-csrf-token": "valid-test-csrf" })).status,
+    400,
+  );
+  const unavailableAgent = await fetch(
+    `${baseUrl}/activation-plans/agent`,
+    {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        origin: "https://atlas.test",
+        "x-csrf-token": "valid-test-csrf",
+      },
+      body: JSON.stringify({
+        input: {
+          interestA: "Jazz",
+          interestAId: "10000000-0000-4000-8000-000000000001",
+          interestB: "Streetwear",
+          interestBId: "10000000-0000-4000-8000-000000000002",
+          city: "New York",
+          activationType: "pop-up",
+          budgetRange: "$5k-$10k",
+          objective: "Test an opt-in concept",
+        },
+        bridgeId: "20000000-0000-4000-8000-000000000001",
+        bridgeName: "Culture market",
+      }),
+    },
+  );
+  assert.equal(unavailableAgent.status, 503);
 
   const authorized = await mutation({ "x-csrf-token": "valid-test-csrf" });
   assert.equal(authorized.status, 200);

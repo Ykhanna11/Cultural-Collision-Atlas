@@ -14,6 +14,7 @@ import {
   type ActivationPlanDraft,
 } from "./product-workflow.ts";
 import type {
+  ActivationPlannerResponse,
   DiscoveryInput,
   DiscoveryResponse,
 } from "@workspace/api-client-react";
@@ -168,12 +169,46 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     reopenedPlanDetails.budgetStatus,
     "User-supplied planning input only; not a cost estimate or supplier quote.",
   );
+  assert.equal("agent" in planPayload.plan, false);
   assert.ok(
     reopenedPlanDetails.sections.some((section) =>
       section.content.includes(
         "aggregate affinity evidence does not establish",
       ),
     ),
+  );
+
+  const agentResult: ActivationPlannerResponse = {
+    source: "openai_qloo_agent",
+    caveat: "Aggregate Qloo evidence does not establish audience overlap.",
+    evidenceReferences: ["qloo-1-1"],
+    hypotheses: ["A co-created pop-up could be tested."],
+    assumptions: ["The concept needs audience validation."],
+    recommendations: ["Run a small opt-in concept test."],
+    evidence: [
+      {
+        referenceId: "qloo-1-1",
+        source: "qloo_api",
+        kind: "insights",
+        entityId: candidate.id,
+        name: candidate.name,
+        details: { affinity: 0.74 },
+      },
+    ],
+  };
+  const agentPlanPayload = buildActivationPlanSaveInput(
+    "Agent-assisted plan",
+    draft,
+    planContent,
+    agentResult,
+  );
+  assert.deepEqual(agentPlanPayload.plan.agent, agentResult);
+  assert.deepEqual(
+    getSavedPlanDetails(agentPlanPayload.plan).sections.at(-2),
+    {
+      title: "Model-generated recommendations",
+      content: "Run a small opt-in concept test.",
+    },
   );
 
   const olderPlan = getSavedPlanDetails({

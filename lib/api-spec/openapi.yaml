@@ -18,6 +18,8 @@ tags:
     description: Cultural bridge discovery and saved discoveries
   - name: plans
     description: Activation plans
+  - name: agent
+    description: Evidence-grounded activation planning
   - name: opportunities
     description: Geographic opportunity data
 security:
@@ -261,6 +263,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivationPlan"
+  /activation-plans/agent:
+    post:
+      operationId: generateActivationPlanWithAgent
+      tags: [agent]
+      summary: Generate an evidence-grounded activation plan
+      description: Uses a bounded server-side OpenAI tool loop with allowlisted Qloo tools. Requires configured OPENAI_API_KEY, OPENAI_MODEL, and Qloo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivationPlannerInput"
+      responses:
+        "200":
+          description: Agent-generated planning hypotheses with validated Qloo evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationPlannerResponse"
+        "400":
+          description: The request body did not match the activation planner input schema
+        "422":
+          description: Qloo evidence was insufficient to support a plan
+        "429":
+          description: Provider rate limit or per-run tool budget was reached
+        "502":
+          description: An AI provider, Qloo tool, or model-output validation failed
+        "503":
+          description: OpenAI model, credential, or Qloo provider is not configured
   /activation-plans/{id}:
     delete:
       operationId: deleteActivationPlan
@@ -413,6 +444,49 @@ components:
         objective: { type: string, minLength: 1, maxLength: 300 }
         audienceDescription: { type: string, maxLength: 500 }
       required: [interestA, interestB, city, activationType, budgetRange, objective, interestAId, interestBId]
+    ActivationPlannerInput:
+      type: object
+      properties:
+        input:
+          $ref: "#/components/schemas/DiscoveryInput"
+        bridgeId: { type: string, minLength: 1, maxLength: 160 }
+        bridgeName: { type: string, minLength: 1, maxLength: 160 }
+      required: [input, bridgeId, bridgeName]
+    AgentEvidence:
+      type: object
+      properties:
+        referenceId: { type: string }
+        source: { type: string, enum: [qloo_api] }
+        kind: { type: string, enum: [entity_search, insights] }
+        entityId: { type: string }
+        name: { type: string }
+        details:
+          type: object
+          additionalProperties:
+            type: ["string", "number", "null"]
+      required: [referenceId, source, kind, entityId, name, details]
+    ActivationPlannerResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [openai_qloo_agent] }
+        caveat: { type: string }
+        evidenceReferences:
+          type: array
+          items: { type: string }
+        hypotheses:
+          type: array
+          items: { type: string }
+        assumptions:
+          type: array
+          items: { type: string }
+        recommendations:
+          type: array
+          items: { type: string }
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentEvidence"
+      required: [source, caveat, evidenceReferences, hypotheses, assumptions, recommendations, evidence]
     EvidenceItem:
       type: object
       properties:
