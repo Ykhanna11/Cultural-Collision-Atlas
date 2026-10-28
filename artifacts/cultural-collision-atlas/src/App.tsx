@@ -1,8 +1,8 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type FormEvent, type ReactNode, useMemo, useReducer, useRef, useState } from 'react';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
-  CircleHelp, Compass, Download, ExternalLink, FileText, Globe2, Layers3, LoaderCircle, LogOut,
+  CircleHelp, Compass, Download, ExternalLink, FileText, Globe2, Layers3, LoaderCircle,
   Map, MapPin, Menu, Network, PanelLeftClose, PanelLeftOpen, Plus, Radar, RefreshCw, Search, Settings2, ShieldCheck,
   Sparkles, Trash2, Waypoints, X,
 } from 'lucide-react';
@@ -14,7 +14,6 @@ import {
   useGetAtlasOverview, useGetOpportunityHeatmap, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
   useSearchQlooEntities, useTestQlooConnection,
-  setCsrfToken,
 } from '@workspace/api-client-react';
 import type {
   ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
@@ -43,20 +42,6 @@ import {
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
-const authSessionQueryKey = ['auth', 'session'];
-type AuthSession = {
-  authenticated: boolean;
-  user: { email: string } | null;
-  csrfToken: string;
-};
-
-async function fetchAuthSession(): Promise<AuthSession> {
-  const response = await fetch('/api/auth/session', { credentials: 'same-origin' });
-  if (!response.ok) throw new Error('Authentication status is unavailable.');
-  const session = await response.json() as AuthSession;
-  setCsrfToken(session.csrfToken);
-  return session;
-}
 
 const navItems = [
   { href: '/', label: 'Overview', icon: Layers3 },
@@ -64,7 +49,7 @@ const navItems = [
   { href: '/atlas', label: 'Opportunity atlas', icon: Map },
   { href: '/plans', label: 'Activation planner', icon: FileText },
   { href: '/saved', label: 'Saved discoveries', icon: Bookmark },
-  { href: '/settings', label: 'Workspace settings', icon: Settings2 },
+  { href: '/settings', label: 'Settings', icon: Settings2 },
 ];
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -135,30 +120,9 @@ function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [logoutError, setLogoutError] = useState(false);
-  const authSession = useQuery<AuthSession>({ queryKey: authSessionQueryKey, queryFn: fetchAuthSession });
-  const authQueryClient = useQueryClient();
   const overview = useGetAtlasOverview();
   const status = useGetQlooStatus();
   const current = navItems.find((item) => item.href === location) ?? navItems[0];
-  const logout = async () => {
-    setLogoutError(false);
-    try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'x-csrf-token': authSession.data?.csrfToken ?? '' },
-      });
-      if (!response.ok) {
-        setLogoutError(true);
-        return;
-      }
-      setCsrfToken(null);
-      window.dispatchEvent(new Event('auth:session-ended'));
-    } catch {
-      setLogoutError(true);
-    }
-  };
   return (
     <div className="min-h-[100dvh]">
       <aside className={cx('fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-white/[.07] bg-[#111522]/95 py-5 backdrop-blur-xl transition-[width] duration-200 lg:flex', sidebarCollapsed ? 'w-[76px] px-2.5' : 'w-[246px] px-4')}>
@@ -176,7 +140,7 @@ function Shell({ children }: { children: ReactNode }) {
         {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} aria-label="Collapse sidebar" title="Collapse sidebar" data-testid="button-collapse-sidebar" className="flex h-8 w-8 items-center justify-center rounded-lg text-[#79859b] hover:bg-white/[.05] hover:text-[#d4d9e4]"><PanelLeftClose size={16} /></button>}
         </div>
         {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} aria-label="Expand sidebar" title="Expand sidebar" data-testid="button-expand-sidebar" className="mb-4 flex h-8 w-full items-center justify-center rounded-lg text-[#79859b] hover:bg-white/[.05] hover:text-[#d4d9e4]"><PanelLeftOpen size={16} /></button>}
-        {!sidebarCollapsed && <div className="eyebrow mb-3 px-3 text-[9px] text-[#687389]">Workspace</div>}
+        {!sidebarCollapsed && <div className="eyebrow mb-3 px-3 text-[9px] text-[#687389]">Atlas</div>}
         <nav className="space-y-1" aria-label="Primary navigation">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -203,17 +167,14 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="mx-auto flex h-[62px] max-w-[1600px] items-center justify-between px-4 sm:px-7 lg:px-10">
             <div className="flex items-center gap-3">
               <button className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-[#aab3c7] lg:hidden" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Toggle navigation" data-testid="button-toggle-navigation"><Menu size={17} /></button>
-              <div className="hidden text-[11px] text-[#687287] sm:block">Workspace <span className="mx-2 text-[#4b5364]">/</span> <span className="text-[#bac1d0]">{current.label}</span></div>
+              <div className="hidden text-[11px] text-[#687287] sm:block">Atlas <span className="mx-2 text-[#4b5364]">/</span> <span className="text-[#bac1d0]">{current.label}</span></div>
               <div className="text-[11px] text-[#bac1d0] sm:hidden">{current.label}</div>
             </div>
             <div className="flex items-center gap-3">
               <div className="hidden sm:block"><StatusPill status={status.data} /></div>
-              <span className="hidden max-w-48 truncate text-[10px] text-[#8792a8] md:block">{authSession.data?.user?.email}</span>
-              <Button variant="quiet" className="h-8 px-2" onClick={() => void logout()} aria-label="Sign out"><LogOut size={14} /></Button>
-              <Link href="/settings" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.08] text-[10px] font-bold text-[#c8baff]" aria-label="Workspace settings" data-testid="link-settings-avatar">CC</Link>
+              <Link href="/settings" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.08] text-[10px] font-bold text-[#c8baff]" aria-label="Settings" data-testid="link-settings-avatar">CC</Link>
             </div>
           </div>
-          {logoutError && <div role="alert" className="px-4 pb-2 text-right text-[10px] text-rose-200">Could not sign out. Please retry.</div>}
           {mobileMenu && <nav className="grid grid-cols-2 gap-1 border-t border-white/[.06] p-3 lg:hidden">{navItems.map((item) => { const Icon = item.icon; return <Link key={item.href} href={item.href} onClick={() => setMobileMenu(false)} className={cx('flex items-center gap-2 rounded-lg px-3 py-2.5 text-[11px]', location === item.href ? 'bg-violet-300/10 text-violet-100' : 'text-[#a3acc0]')}><Icon size={14} />{item.label}</Link>; })}</nav>}
         </header>
         <main className="mx-auto max-w-[1600px] px-4 pb-16 pt-7 sm:px-7 sm:pt-9 lg:px-10">{children}</main>
@@ -859,92 +820,7 @@ function Router() {
 }
 
 function App() {
-  return <QueryClientProvider client={queryClient}><AuthGate><Router /></AuthGate></QueryClientProvider>;
-}
-
-function AuthGate({ children }: { children: ReactNode }) {
-  const authSession = useQuery<AuthSession>({
-    queryKey: authSessionQueryKey,
-    queryFn: fetchAuthSession,
-    retry: false,
-  });
-  const authQueryClient = useQueryClient();
-  const currentUser = useRef<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (!authSession.data) return;
-    const nextUser = authSession.data.authenticated
-      ? authSession.data.user?.email ?? null
-      : null;
-    if (currentUser.current !== undefined && currentUser.current !== nextUser) {
-      authQueryClient.removeQueries({
-        predicate: (query) => query.queryKey[0] !== 'auth',
-      });
-    }
-    currentUser.current = nextUser;
-  }, [
-    authQueryClient,
-    authSession.data?.authenticated,
-    authSession.data?.user?.email,
-  ]);
-
-  useEffect(() => {
-    const clearWorkspaceData = () => {
-      authQueryClient.removeQueries({
-        predicate: (query) => query.queryKey[0] !== 'auth',
-      });
-      void authQueryClient.invalidateQueries({ queryKey: authSessionQueryKey });
-    };
-
-    const channel = typeof BroadcastChannel === 'undefined'
-      ? null
-      : new BroadcastChannel('cca-auth');
-    const handleSessionEnded = () => {
-      clearWorkspaceData();
-      channel?.postMessage('session-ended');
-    };
-    const handleBroadcast = (event: MessageEvent<unknown>) => {
-      if (event.data === 'session-ended') clearWorkspaceData();
-    };
-    const refreshCsrfToken = () => {
-      void authQueryClient.invalidateQueries({ queryKey: authSessionQueryKey });
-    };
-    window.addEventListener('auth:unauthorized', handleSessionEnded);
-    window.addEventListener('auth:session-ended', handleSessionEnded);
-    window.addEventListener('auth:csrf-invalid', refreshCsrfToken);
-    channel?.addEventListener('message', handleBroadcast);
-    return () => {
-      window.removeEventListener('auth:unauthorized', handleSessionEnded);
-      window.removeEventListener('auth:session-ended', handleSessionEnded);
-      window.removeEventListener('auth:csrf-invalid', refreshCsrfToken);
-      channel?.removeEventListener('message', handleBroadcast);
-      channel?.close();
-    };
-  }, [authQueryClient]);
-
-  if (authSession.isLoading) {
-    return <main className="grid min-h-[100dvh] place-items-center text-sm text-[#aab3c7]">Checking sign-in…</main>;
-  }
-  if (authSession.isError) {
-    return <main className="grid min-h-[100dvh] place-items-center p-6">
-      <section role="alert" className="surface max-w-md rounded-2xl p-8 text-center text-sm text-rose-200">
-        <p>Sign-in service is unavailable. Please retry.</p>
-        <Button className="mt-4" onClick={() => void authSession.refetch()}>Retry</Button>
-      </section>
-    </main>;
-  }
-  if (!authSession.data?.authenticated) {
-    const rejected = new URLSearchParams(window.location.search).get('authError') === 'sign_in_failed';
-    return <main className="grid min-h-[100dvh] place-items-center p-6">
-      <section className="surface max-w-md rounded-2xl p-8 text-center">
-        <h1 className="text-xl font-semibold text-[#f0eff8]">Cultural Collision Atlas</h1>
-        <p className="mt-3 text-sm leading-6 text-[#9ba5b9]">Sign in with an authorized Google account to open your private workspace.</p>
-        {rejected && <p role="alert" className="mt-4 text-xs text-rose-200">Sign-in was not completed or this account is not authorized.</p>}
-        <a className="mt-6 inline-flex rounded-[10px] bg-[#9b82ed] px-4 py-2.5 text-sm font-semibold text-[#171322]" href="/api/auth/login">Continue with Google</a>
-      </section>
-    </main>;
-  }
-  return children;
+  return <QueryClientProvider client={queryClient}><Router /></QueryClientProvider>;
 }
 
 export default App;

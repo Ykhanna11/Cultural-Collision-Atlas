@@ -1,13 +1,11 @@
-import express, { type Express, type RequestHandler } from "express";
+import express, { type Express } from "express";
 import { fileURLToPath } from "node:url";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { sessionMiddleware } from "./routes/auth";
 
 export function createApp(
   options: {
-    sessionHandler?: RequestHandler;
     beforeApi?: (app: Express) => void;
   } = {},
 ): Express {
@@ -33,7 +31,6 @@ export function createApp(
     }),
   );
   app.set("trust proxy", 1);
-  app.use(options.sessionHandler ?? sessionMiddleware);
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 

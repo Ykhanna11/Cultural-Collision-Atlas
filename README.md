@@ -23,21 +23,21 @@ pnpm --filter @workspace/api-server run start
 
 The API binds to the runtime `PORT` supplied by the host. In production it expects the frontend build to exist at the path above.
 
-### Future Render dashboard setup
+### Render dashboard setup
 
-Create one **Web Service** from the repository root. A suitable build command is `pnpm install --frozen-lockfile && pnpm run build`; use `pnpm --filter @workspace/api-server run start` as the start command. Set `NODE_ENV=production`; allow Render to provide the runtime `PORT`. `AUTH_BASE_URL` must be set to the service's actual public HTTPS origin without a path. Configure a health check at `/api/healthz`.
+Create one **Web Service** from the repository root. A suitable build command is `pnpm install --frozen-lockfile && pnpm run build`; use `pnpm --filter @workspace/api-server run start` as the start command. Set `NODE_ENV=production`; allow Render to provide the runtime `PORT`. Configure a health check at `/api/healthz`.
 
-Store `DATABASE_URL`, `GOOGLE_OIDC_CLIENT_SECRET`, `AUTH_SESSION_SECRET`, and (if used) `QLOO_API_KEY` and `OPENAI_API_KEY` as server-side secrets. Set `GOOGLE_OIDC_CLIENT_ID`, `AUTH_BASE_URL`, `AUTH_ALLOWED_EMAILS`, and (if using AI planning) `OPENAI_MODEL` as API runtime environment values, not Vite/browser variables. Choose a model identifier that is enabled for the account; the application does not assume a default. `AUTH_SESSION_SECRET` must contain at least 32 bytes and remain stable across restarts. The API fails startup if required auth configuration or `DATABASE_URL` is missing.
+Keep `DATABASE_URL` as a server-side secret. `QLOO_API_KEY` enables live Qloo search, discovery, and heatmaps; `OPENAI_API_KEY` and `OPENAI_MODEL` enable AI-assisted planning. Keep these integration values server-side, not in Vite/browser variables. `DATABASE_URL` and Render's runtime `PORT` are required. No OAuth, session, or authentication configuration is required.
 
-Register the Google Web application redirect URI exactly as `${AUTH_BASE_URL}/api/auth/callback` after the actual Render service URL is assigned. The app requires HTTPS in production and configures Secure, HttpOnly, SameSite=Lax session cookies. Express trusts one proxy hop; verify in staging that Render's forwarded protocol and proxy topology support secure cookie issuance before opening access.
+The app and API are public. Express trusts one proxy hop for rate-limit client IPs; confirm the Render proxy topology is compatible with that setting.
 
-### Staging database and migration
+### Existing PostgreSQL database
 
-Provision a separate staging PostgreSQL database, verify a restorable backup, and confirm the pre-existing `saved_discoveries` and `activation_plans` tables before applying [`lib/db/migrations/0001_auth_workspaces.sql`](./lib/db/migrations/0001_auth_workspaces.sql) once through a controlled process. The migration is transactional but not idempotent, is not run automatically, and requires the existing tables. Verify the users, workspaces, sessions, foreign keys, and indexes before starting the service; the session store uses `createTableIfMissing: false`.
+Keep the existing Render PostgreSQL database and all its data. This release does not run schema migrations or drop/alter tables. Before deploying, verify that the existing `users`, `workspaces`, `saved_discoveries`, and `activation_plans` schema from [`lib/db/migrations/0001_auth_workspaces.sql`](./lib/db/migrations/0001_auth_workspaces.sql) is present; do not rerun this non-idempotent migration if it has already been applied.
 
-Existing saved rows remain unassigned (`workspace_id` is null) and quarantined from authenticated workspace lists, counts, and deletes. Do not backfill ownership without a separate review. Do not point an old unauthenticated API at the migrated database. Prefer restoring the staging backup for a full rollback; otherwise retain the additive schema and roll forward with a reviewed fix rather than dropping ownership data.
+On first use of saved data, the API idempotently creates a dedicated public-demo identity and workspace in the existing identity tables. Saved discoveries, activation plans, and overview counts all use that workspace. Every visitor can see, create, and delete records in this shared demo workspace. Existing records assigned to other workspaces and legacy rows with a null `workspace_id` remain untouched and are excluded from public lists, counts, and deletes. Do not backfill or reassign those rows.
 
-Render dashboard configuration and migration are future staging steps; no hostnames, secrets, or database are configured by this repository.
+This repository does not configure Render environment variables or deploy the service.
 
 To check the TypeScript workspace:
 
@@ -59,39 +59,11 @@ Live entity search, discovery, and heatmap requests require a Qloo API key:
 2. Restart the API server.
 3. Open **Settings** in Cultural Collision Atlas and run the connection test.
 
-The key is read only by the API server and is never sent to the browser. The connection is labeled unverified until a real authenticated request succeeds. The API client isolates Qloo endpoint paths and request construction in `artifacts/api-server/src/lib/qloo/` so they can be updated against Qloo's current reference.
+The key is read only by the API server and is never sent to the browser. The connection is labeled unverified until a real credentialed Qloo request succeeds. The API client isolates Qloo endpoint paths and request construction in `artifacts/api-server/src/lib/qloo/` so they can be updated against Qloo's current reference.
 
-## Authentication and database migration
+## Public-demo access and limits
 
-Configure these values on the **API server** before starting the authentication-enabled application:
-
-- `AUTH_BASE_URL`: the public application origin, without a path; production must use HTTPS.
-- `GOOGLE_OIDC_CLIENT_ID`: the OAuth client ID for a Google **Web application** OAuth client.
-- `GOOGLE_OIDC_CLIENT_SECRET`: that same OAuth client's server-side secret.
-- `AUTH_SESSION_SECRET`: at least 32 bytes of random data; keep it stable across API instances and restarts.
-- `AUTH_ALLOWED_EMAILS`: comma-separated exact email addresses allowed to sign in; Google must report each email as verified.
-- `DATABASE_URL`: connection string for the staging PostgreSQL database. The database package requires it at startup, and sessions/users/workspaces use it.
-- `PORT`: valid positive port for the API server.
-- `NODE_ENV=production`: use this for production-mode staging over HTTPS; it enables Secure session cookies and the `__Host-` cookie name.
-- `QLOO_API_KEY` is optional for auth/session-only checks, but must be configured on the API server to test live Qloo discovery and heatmap integrations.
-- `OPENAI_API_KEY` and `OPENAI_MODEL` are optional for deterministic planning; both must be configured on the API server to enable AI-assisted planning. The model identifier is account-dependent, and neither value is sent to the browser. Each Responses API decision is capped at 1,200 output tokens.
-
-Google Cloud setup: configure the OAuth consent screen and (while in testing mode) add the intended test accounts. Create an OAuth client of type **Web application** and register this Authorized redirect URI exactly: `${AUTH_BASE_URL}/api/auth/callback` (the code appends the fixed path `/api/auth/callback` to the configured origin). Add the resulting client ID/secret to the API server configuration, then set `AUTH_ALLOWED_EMAILS` to the exact approved account addresses. The client secret and session secret must never be included in the web app or browser storage.
-
-Staging sequence:
-
-1. Provision a separate staging PostgreSQL database and take a restorable snapshot/backup before changing its schema.
-2. Apply [`lib/db/migrations/0001_auth_workspaces.sql`](./lib/db/migrations/0001_auth_workspaces.sql) once through the approved migration process. It is transactional but intentionally not idempotent. Verify the identity, workspace, session tables, constraints, and indexes before starting the new API.
-3. Configure the server-side variables above, the Google callback URI, and the allowlisted staging accounts. Run the API behind the intended HTTPS proxy, with `NODE_ENV=production`; confirm the proxy topology matches the configured one-hop `trust proxy` setting.
-4. Start the API and then the web app; test health, allowed/denied login, session persistence/logout, and two-user workspace isolation. The app does not automatically apply the migration or test database connectivity at startup. The session store is configured with `createTableIfMissing: false`, so its table must already exist.
-
-The migration adds nullable workspace foreign keys and does not assign existing records. Those rows remain preserved but quarantined (not listed, counted, or deletable by authenticated workspaces) until a separately reviewed ownership decision. The `sessions` table in the migration matches the Drizzle declaration in `lib/db/src/schema/identity.ts` and the PostgreSQL session-store configuration. Do not use schema push as a substitute for the reviewed migration.
-
-Rollback precautions: if staging validation fails after the new API has accepted data, take the app offline or keep it behind the staging access gate while diagnosing. Do **not** point the old unauthenticated API at a database containing workspace-owned records; its global queries could expose them. Prefer restoring the pre-migration staging snapshot for a full rollback. Otherwise leave the additive schema in place and roll forward with a reviewed fix; do not drop tables/columns or remove workspace ownership data as an ad hoc rollback.
-
-The browser uses a server-managed, HttpOnly, Secure-in-production, SameSite=Lax session cookie and a session-bound CSRF token. Provider-backed requests are limited to 30 per IP per 15-minute window in each API process; use a shared rate-limit store if the API is horizontally scaled.
-
-Each allowlisted Google identity receives a private workspace on first sign-in. The application scopes saved-discovery and activation-plan reads, counts, inserts, and deletes to that workspace. The migration is not run automatically by the server.
+The app opens directly without accounts, sign-in screens, cookies, or session state. All visitors share the dedicated public-demo saved-data workspace; do not store personal or confidential information there. Mutating saved discoveries/plans is limited to 60 requests per IP per 15 minutes. Provider-backed requests remain limited to 30 per IP per 15 minutes in each API process. Use a shared rate-limit store if the API is horizontally scaled.
 
 Official references used for the current request shape:
 

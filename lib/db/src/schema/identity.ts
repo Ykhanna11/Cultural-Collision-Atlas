@@ -1,12 +1,9 @@
 import {
   pgTable,
-  index,
-  json,
   text,
   timestamp,
   uniqueIndex,
   uuid,
-  varchar,
 } from "drizzle-orm/pg-core";
 
 export const usersTable = pgTable(
@@ -42,14 +39,4 @@ export const workspacesTable = pgTable(
   (table) => [
     uniqueIndex("workspaces_owner_user_id_idx").on(table.ownerUserId),
   ],
-);
-
-export const sessionsTable = pgTable(
-  "sessions",
-  {
-    sid: varchar("sid").primaryKey(),
-    sess: json("sess").$type<Record<string, unknown>>().notNull(),
-    expire: timestamp("expire", { precision: 6 }).notNull(),
-  },
-  (table) => [index("sessions_expire_idx").on(table.expire)],
 );

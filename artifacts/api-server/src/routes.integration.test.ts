@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { createServer } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { after, before, test } from "node:test";
-import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const databaseUrl = "postgres://synthetic_test_user:synthetic_test_password@127.0.0.1:1/staging_test";
@@ -29,12 +28,7 @@ before(async () => {
     cwd: fileURLToPath(new URL("..", import.meta.url)),
     env: {
       PATH: process.env.PATH,
-      AUTH_BASE_URL: "https://atlas.example.test",
-      AUTH_ALLOWED_EMAILS: "staging-user@example.test",
-      AUTH_SESSION_SECRET: randomBytes(32).toString("base64url"),
       DATABASE_URL: databaseUrl,
-      GOOGLE_OIDC_CLIENT_ID: "test-client-id",
-      GOOGLE_OIDC_CLIENT_SECRET: "test-client-secret",
       NODE_ENV: "production",
       PORT: String(port),
     },
@@ -68,38 +62,43 @@ after(async () => {
   }
 });
 
-test("the real API keeps health public and rejects protected routes unauthenticated", async () => {
+test("the API starts without OAuth configuration and serves public feature routes", async () => {
   const health = await fetch(`${baseUrl}/healthz`);
   assert.equal(health.status, 200);
 
-  const protectedRequests: Array<{
+  const qlooStatus = await fetch(`${baseUrl}/qloo/status`);
+  assert.equal(qlooStatus.status, 200);
+  assert.equal(qlooStatus.headers.has("set-cookie"), false);
+
+  const publicRequests: Array<{
     method: string;
     path: string;
+    body: unknown;
+    expectedStatus: number;
   }> = [
-    { method: "GET", path: "/atlas/overview" },
-    { method: "GET", path: "/qloo/status" },
-    { method: "POST", path: "/discoveries" },
-    { method: "GET", path: "/discoveries/saved" },
-    { method: "POST", path: "/discoveries/saved" },
-    { method: "DELETE", path: "/discoveries/saved/1" },
-    { method: "GET", path: "/activation-plans" },
-    { method: "POST", path: "/activation-plans" },
-    { method: "POST", path: "/activation-plans/agent" },
-    { method: "DELETE", path: "/activation-plans/1" },
-    { method: "POST", path: "/qloo/test" },
-    { method: "POST", path: "/qloo/entities/search" },
-    { method: "POST", path: "/opportunities/heatmap" },
-    { method: "POST", path: "/auth/logout" },
+    { method: "POST", path: "/qloo/test", body: { query: "test" }, expectedStatus: 200 },
+    { method: "POST", path: "/discoveries", body: {}, expectedStatus: 400 },
+    { method: "POST", path: "/discoveries/saved", body: {}, expectedStatus: 400 },
+    { method: "DELETE", path: "/discoveries/saved/not-an-id", body: null, expectedStatus: 400 },
+    { method: "POST", path: "/activation-plans", body: {}, expectedStatus: 400 },
+    { method: "POST", path: "/activation-plans/agent", body: {}, expectedStatus: 400 },
+    { method: "DELETE", path: "/activation-plans/not-an-id", body: null, expectedStatus: 400 },
+    { method: "POST", path: "/qloo/entities/search", body: {}, expectedStatus: 400 },
+    { method: "POST", path: "/opportunities/heatmap", body: {}, expectedStatus: 400 },
   ];
 
-  for (const { method, path } of protectedRequests) {
+  for (const { method, path, body, expectedStatus } of publicRequests) {
     const response = await fetch(`${baseUrl}${path}`, {
       method,
       headers: { "content-type": "application/json" },
-      body: method === "POST" ? "{}" : undefined,
+      body: body === null ? undefined : JSON.stringify(body),
     });
-    assert.equal(response.status, 401, `${method} ${path}`);
+    assert.equal(response.status, expectedStatus, `${method} ${path}`);
+    assert.equal(response.status === 401 || response.status === 403, false);
   }
+
+  const removedAuthEndpoint = await fetch(`${baseUrl}/auth/session`);
+  assert.equal(removedAuthEndpoint.status, 404);
 });
 
 test("production serves frontend assets and falls back only for frontend routes", async () => {
@@ -114,6 +113,8 @@ test("production serves frontend assets and falls back only for frontend routes"
   const scriptResponse = await fetch(new URL(scriptPath, appUrl));
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /javascript/);
+  const bundle = await scriptResponse.text();
+  assert.doesNotMatch(bundle, /Continue with Google|\/api\/auth\/login|Checking sign-in/);
 
   const spaResponse = await fetch(`${appUrl}/saved-discoveries`, {
     headers: { accept: "text/html" },
@@ -133,32 +134,4 @@ test("production serves frontend assets and falls back only for frontend routes"
 
   const missingAssetResponse = await fetch(`${appUrl}/assets/not-found.js`);
   assert.equal(missingAssetResponse.status, 404);
-});
-
-test("the real API refuses to start without authentication configuration", async () => {
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    DATABASE_URL: databaseUrl,
-    NODE_ENV: "production",
-    PORT: "1",
-  };
-  delete env.AUTH_BASE_URL;
-  delete env.AUTH_ALLOWED_EMAILS;
-  delete env.AUTH_SESSION_SECRET;
-  delete env.GOOGLE_OIDC_CLIENT_ID;
-  delete env.GOOGLE_OIDC_CLIENT_SECRET;
-
-  const child = spawn(process.execPath, ["dist/index.mjs"], {
-    cwd: fileURLToPath(new URL("..", import.meta.url)),
-    env,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let stderr = "";
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  const [exitCode] = await once(child, "exit");
-  assert.notEqual(exitCode, 0);
-  assert.match(stderr, /AUTH_BASE_URL/);
 });

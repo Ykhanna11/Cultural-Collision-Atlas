@@ -18,37 +18,7 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * @summary Read the current session and CSRF token
- */
-export const GetAuthSessionResponse = zod.object({
-  "authenticated": zod.boolean(),
-  "user": zod.union([zod.object({
-  "email": zod.string().email()
-}),zod.null()]),
-  "csrfToken": zod.string()
-})
-
-
-/**
- * @summary Begin Google OIDC sign-in
- */
-export const StartLoginResponse = zod.void()
-
-
-/**
- * @summary Complete Google OIDC sign-in
- */
-export const CompleteLoginResponse = zod.void()
-
-
-/**
- * @summary Destroy the current server-side session
- */
-export const LogoutResponse = zod.void()
-
-
-/**
- * @summary Get workspace overview
+ * @summary Get public demo overview
  */
 export const GetAtlasOverviewResponse = zod.object({
   "savedDiscoveries": zod.number().int(),
@@ -77,7 +47,7 @@ export const GetQlooStatusResponse = zod.object({
 
 
 /**
- * @summary Verify an authenticated request to Qloo
+ * @summary Verify the Qloo connection
  */
 export const testQlooConnectionBodyQueryMax = 120;
 

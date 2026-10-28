@@ -9,25 +9,23 @@ import { desc } from "drizzle-orm";
 import { activationPlansTable, db } from "@workspace/db";
 import {
   assignWorkspace,
+  getPublicDemoWorkspaceId,
   ownedRecordFilter,
   workspaceFilter,
 } from "../lib/workspace-scope";
-import { requireAuthentication, requireCsrf } from "../lib/security";
+import { publicMutationRateLimit } from "../lib/public-mutation-rate-limit";
 
 const router: IRouter = Router();
 
 router.get(
   "/activation-plans",
-  requireAuthentication,
-  async (req, res): Promise<void> => {
+  async (_req, res): Promise<void> => {
+    const workspaceId = await getPublicDemoWorkspaceId();
     const plans = await db
       .select()
       .from(activationPlansTable)
       .where(
-        workspaceFilter(
-          activationPlansTable.workspaceId,
-          req.session.workspaceId!,
-        ),
+        workspaceFilter(activationPlansTable.workspaceId, workspaceId),
       )
       .orderBy(desc(activationPlansTable.createdAt));
     res.json(ListActivationPlansResponse.parse(plans));
@@ -36,8 +34,7 @@ router.get(
 
 router.post(
   "/activation-plans",
-  requireAuthentication,
-  requireCsrf,
+  publicMutationRateLimit,
   async (req, res): Promise<void> => {
     const parsed = SaveActivationPlanBody.safeParse(req.body);
     if (!parsed.success) {
@@ -45,9 +42,10 @@ router.post(
       return;
     }
 
+    const workspaceId = await getPublicDemoWorkspaceId();
     const [plan] = await db
       .insert(activationPlansTable)
-      .values(assignWorkspace(parsed.data, req.session.workspaceId!))
+      .values(assignWorkspace(parsed.data, workspaceId))
       .returning();
     res.status(201).json(SaveActivationPlanResponse.parse(plan));
   },
@@ -55,8 +53,7 @@ router.post(
 
 router.delete(
   "/activation-plans/:id",
-  requireAuthentication,
-  requireCsrf,
+  publicMutationRateLimit,
   async (req, res): Promise<void> => {
     const parsed = DeleteActivationPlanParams.safeParse(req.params);
     if (!parsed.success) {
@@ -64,6 +61,7 @@ router.delete(
       return;
     }
 
+    const workspaceId = await getPublicDemoWorkspaceId();
     const [deleted] = await db
       .delete(activationPlansTable)
       .where(
@@ -71,7 +69,7 @@ router.delete(
           activationPlansTable.id,
           activationPlansTable.workspaceId,
           parsed.data.id,
-          req.session.workspaceId!,
+          workspaceId,
         ),
       )
       .returning({ id: activationPlansTable.id });

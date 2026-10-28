@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import { randomBytes } from "node:crypto";
 import { after, before, test } from "node:test";
-import session from "express-session";
-import type { Express, RequestHandler } from "express";
 
-process.env.AUTH_BASE_URL = "https://atlas.test";
-process.env.AUTH_ALLOWED_EMAILS = "allowed@example.test";
-process.env.AUTH_SESSION_SECRET =
-  "local-test-session-secret-value-at-least-32-bytes";
-process.env.DATABASE_URL = "postgres://local-test:unused@127.0.0.1:1/test";
-process.env.GOOGLE_OIDC_CLIENT_ID = "local-test-client";
-process.env.GOOGLE_OIDC_CLIENT_SECRET = "local-test-client-secret";
+for (const name of [
+  "AUTH_BASE_URL",
+  "AUTH_ALLOWED_EMAILS",
+  "AUTH_SESSION_SECRET",
+  "GOOGLE_OIDC_CLIENT_ID",
+  "GOOGLE_OIDC_CLIENT_SECRET",
+]) {
+  delete process.env[name];
+}
+process.env.DATABASE_URL = "postgres://127.0.0.1:1/test";
 delete process.env.QLOO_API_KEY;
 delete process.env.OPENAI_API_KEY;
 delete process.env.OPENAI_MODEL;
@@ -41,42 +41,11 @@ function registeredRoutes(layers: ExpressLayer[]): ExpressLayer["route"][] {
   );
 }
 
-const publicRoutes = new Set([
-  "GET /healthz",
-  "GET /auth/session",
-  "GET /auth/login",
-  "GET /auth/callback",
-]);
-
 let server: Server;
 let baseUrl: string;
 
 before(async () => {
-  const sessionHandler = session({
-    secret: randomBytes(32).toString("base64url"),
-    resave: false,
-    saveUninitialized: false,
-    store: new session.MemoryStore(),
-  }) as RequestHandler;
-  const app = createApp({
-    sessionHandler,
-    beforeApi: (target: Express) => {
-      target.get("/__test/session", (req, res) => {
-        req.session.userId = "test-user";
-        req.session.workspaceId = "test-workspace";
-        req.session.email = "allowed@example.test";
-        req.session.csrfToken = "valid-test-csrf";
-        req.session.save((error) => {
-          if (error) {
-            res.sendStatus(500);
-            return;
-          }
-          res.sendStatus(204);
-        });
-      });
-    },
-  });
-
+  const app = createApp();
   server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -90,7 +59,7 @@ after(async () => {
   await once(server, "close");
 });
 
-test("every registered API route is protected unless explicitly public", () => {
+test("all feature routes are registered without authentication middleware", () => {
   const routes = registeredRoutes(
     (router as unknown as { stack: ExpressLayer[] }).stack,
   );
@@ -98,127 +67,68 @@ test("every registered API route is protected unless explicitly public", () => {
 
   for (const route of routes) {
     assert.ok(route);
-    for (const [method, enabled] of Object.entries(route.methods)) {
-      if (!enabled || method === "_all") continue;
-      const routeKey = `${method.toUpperCase()} ${route.path}`;
-      const handlers = route.stack.map((layer) => layer.handle.name);
-      if (publicRoutes.has(routeKey)) continue;
-
-      assert.ok(
-        handlers.includes("requireAuthentication"),
-        `${routeKey} must require authentication or be explicitly allowlisted`,
-      );
-      if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) {
-        assert.ok(
-          handlers.includes("requireCsrf"),
-          `${routeKey} must require CSRF validation`,
-        );
-      }
+    assert.equal(String(route.path).startsWith("/auth/"), false);
+    for (const layer of route.stack) {
+      assert.notEqual(layer.handle.name, "requireAuthentication");
+      assert.notEqual(layer.handle.name, "requireCsrf");
     }
   }
 });
 
-test("real API wiring rejects unauthenticated access and enforces CSRF", async () => {
-  const publicSession = await fetch(`${baseUrl}/auth/session`);
-  assert.equal(publicSession.status, 200);
+test("health and provider APIs work without cookies or CSRF tokens", async () => {
+  const health = await fetch(`${baseUrl}/healthz`);
+  assert.equal(health.status, 200);
+  assert.equal(health.headers.has("set-cookie"), false);
 
-  const unauthenticatedRead = await fetch(`${baseUrl}/qloo/status`);
-  assert.equal(unauthenticatedRead.status, 401);
+  const qlooStatus = await fetch(`${baseUrl}/qloo/status`);
+  assert.equal(qlooStatus.status, 200);
+  assert.equal(qlooStatus.headers.has("set-cookie"), false);
 
-  const unauthenticatedMutation = await fetch(`${baseUrl}/qloo/test`, {
+  const connectionTest = await fetch(`${baseUrl}/qloo/test`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ query: "test" }),
   });
-  assert.equal(unauthenticatedMutation.status, 401);
+  assert.equal(connectionTest.status, 200);
 
-  const unauthenticatedAgentMutation = await fetch(
-    `${baseUrl}/activation-plans/agent`,
-    {
+  const agentValidation = await fetch(`${baseUrl}/activation-plans/agent`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(agentValidation.status, 400);
+
+  const unavailableAgent = await fetch(`${baseUrl}/activation-plans/agent`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      input: {
+        interestA: "Jazz",
+        interestAId: "10000000-0000-4000-8000-000000000001",
+        interestB: "Streetwear",
+        interestBId: "10000000-0000-4000-8000-000000000002",
+        city: "New York",
+        activationType: "pop-up",
+        budgetRange: "$5k-$10k",
+        objective: "Test an opt-in concept",
+      },
+      bridgeId: "20000000-0000-4000-8000-000000000001",
+      bridgeName: "Culture market",
+    }),
+  });
+  assert.equal(unavailableAgent.status, 503);
+});
+
+test("public writes retain request validation and abuse limits", async () => {
+  const invalidRequest = () =>
+    fetch(`${baseUrl}/discoveries/saved`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
-    },
-  );
-  assert.equal(unauthenticatedAgentMutation.status, 401);
-
-  const seededSession = await fetch(
-    `${baseUrl.replace(/\/api$/, "")}/__test/session`,
-  );
-  assert.equal(seededSession.status, 204);
-  const cookie = seededSession.headers.get("set-cookie")?.split(";", 1)[0];
-  assert.ok(cookie);
-
-  const mutation = (headers: Record<string, string>) =>
-    fetch(`${baseUrl}/qloo/test`, {
-      method: "POST",
-      headers: {
-        cookie,
-        "content-type": "application/json",
-        origin: "https://atlas.test",
-        ...headers,
-      },
-      body: JSON.stringify({ query: "test" }),
     });
 
-  assert.equal((await mutation({})).status, 403);
-  assert.equal((await mutation({ "x-csrf-token": "wrong-token" })).status, 403);
-  assert.equal(
-    (
-      await mutation({
-        "x-csrf-token": "valid-test-csrf",
-        origin: "https://attacker.test",
-      })
-    ).status,
-    403,
-  );
-
-  const agentMutation = (headers: Record<string, string>) =>
-    fetch(`${baseUrl}/activation-plans/agent`, {
-      method: "POST",
-      headers: {
-        cookie,
-        "content-type": "application/json",
-        origin: "https://atlas.test",
-        ...headers,
-      },
-      body: "{}",
-    });
-  assert.equal((await agentMutation({})).status, 403);
-  assert.equal(
-    (await agentMutation({ "x-csrf-token": "valid-test-csrf" })).status,
-    400,
-  );
-  const unavailableAgent = await fetch(
-    `${baseUrl}/activation-plans/agent`,
-    {
-      method: "POST",
-      headers: {
-        cookie,
-        "content-type": "application/json",
-        origin: "https://atlas.test",
-        "x-csrf-token": "valid-test-csrf",
-      },
-      body: JSON.stringify({
-        input: {
-          interestA: "Jazz",
-          interestAId: "10000000-0000-4000-8000-000000000001",
-          interestB: "Streetwear",
-          interestBId: "10000000-0000-4000-8000-000000000002",
-          city: "New York",
-          activationType: "pop-up",
-          budgetRange: "$5k-$10k",
-          objective: "Test an opt-in concept",
-        },
-        bridgeId: "20000000-0000-4000-8000-000000000001",
-        bridgeName: "Culture market",
-      }),
-    },
-  );
-  assert.equal(unavailableAgent.status, 503);
-
-  const authorized = await mutation({ "x-csrf-token": "valid-test-csrf" });
-  assert.equal(authorized.status, 200);
-  const responseBody = (await authorized.json()) as { configured?: boolean };
-  assert.equal(responseBody.configured, false);
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    assert.equal((await invalidRequest()).status, 400);
+  }
+  assert.equal((await invalidRequest()).status, 429);
 });

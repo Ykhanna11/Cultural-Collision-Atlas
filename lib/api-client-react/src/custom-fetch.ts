@@ -6,8 +6,6 @@ export type ErrorType<T = unknown> = ApiError<T>;
 
 export type BodyType<T> = T;
 
-export type AuthTokenGetter = () => Promise<string | null> | string | null;
-
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
@@ -16,12 +14,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 // ---------------------------------------------------------------------------
 
 let _baseUrl: string | null = null;
-let _authTokenGetter: AuthTokenGetter | null = null;
-let _csrfToken: string | null = null;
 
-export function setCsrfToken(token: string | null): void {
-  _csrfToken = token;
-}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -32,21 +25,6 @@ export function setCsrfToken(token: string | null): void {
  */
 export function setBaseUrl(url: string | null): void {
   _baseUrl = url ? url.replace(/\/+$/, "") : null;
-}
-
-/**
- * Register a getter that supplies a bearer auth token.  Before every fetch
- * the getter is invoked; when it returns a non-null string, an
- * `Authorization: Bearer <token>` header is attached to the request.
- *
- * Useful for Expo bundles making token-gated API calls.
- * Pass `null` to clear the getter.
- *
- * NOTE: This function should never be used in web applications where session
- * token cookies are automatically associated with API calls by the browser.
- */
-export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
-  _authTokenGetter = getter;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -367,40 +345,18 @@ export async function customFetch<T = unknown>(
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
 
-  if (_csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
-    headers.set("x-csrf-token", _csrfToken);
-  }
-
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
-  if (_authTokenGetter && !headers.has("authorization")) {
-    const token = await _authTokenGetter();
-    if (token) {
-      headers.set("authorization", `Bearer ${token}`);
-    }
-  }
-
   const requestInfo = { method, url: resolveUrl(input) };
 
   const response = await fetch(input, {
     ...init,
     method,
     headers,
-    credentials: "same-origin",
+    credentials: "omit",
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      _csrfToken = null;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("auth:unauthorized"));
-      }
-    } else if (response.status === 403) {
-      _csrfToken = null;
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("auth:csrf-invalid"));
-      }
-    }
     const errorData = await parseErrorBody(response, method);
     throw new ApiError(response, errorData, requestInfo);
   }

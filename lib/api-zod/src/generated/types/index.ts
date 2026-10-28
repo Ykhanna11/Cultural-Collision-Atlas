@@ -15,8 +15,6 @@ export * from './agentEvidenceDetails';
 export * from './agentEvidenceKind';
 export * from './agentEvidenceSource';
 export * from './atlasOverview';
-export * from './authSession';
-export * from './authSessionUser';
 export * from './bridgeCandidate';
 export * from './bridgeCandidateConfidence';
 export * from './bridgeCandidateLocalityStatus';

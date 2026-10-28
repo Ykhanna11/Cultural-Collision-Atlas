@@ -5,6 +5,7 @@ import { PgDialect, pgTable, serial, uuid } from "drizzle-orm/pg-core";
 import {
   assignWorkspace,
   ownedRecordFilter,
+  PUBLIC_DEMO_WORKSPACE_ID,
   workspaceFilter,
 } from "./workspace-scope.ts";
 
@@ -18,41 +19,53 @@ const plansTable = pgTable("activation_plans", {
   workspaceId: uuid("workspace_id"),
 });
 
-test("record deletion predicates include both record ID and workspace ID", () => {
+test("saved discoveries and activation plans share one isolated public-demo scope", () => {
+  assert.match(PUBLIC_DEMO_WORKSPACE_ID, /^[0-9a-f-]{36}$/);
+
   const discovery = dialect.sqlToQuery(
     ownedRecordFilter(
       discoveriesTable.id,
       discoveriesTable.workspaceId,
       17,
-      "workspace-a",
+      PUBLIC_DEMO_WORKSPACE_ID,
     ),
   );
   assert.match(discovery.sql, /saved_discoveries.*id/);
   assert.match(discovery.sql, /saved_discoveries.*workspace_id/);
-  assert.deepEqual(discovery.params, [17, "workspace-a"]);
+  assert.deepEqual(discovery.params, [17, PUBLIC_DEMO_WORKSPACE_ID]);
 
   const plan = dialect.sqlToQuery(
-    ownedRecordFilter(plansTable.id, plansTable.workspaceId, 23, "workspace-b"),
+    ownedRecordFilter(
+      plansTable.id,
+      plansTable.workspaceId,
+      23,
+      PUBLIC_DEMO_WORKSPACE_ID,
+    ),
   );
   assert.match(plan.sql, /activation_plans.*id/);
   assert.match(plan.sql, /activation_plans.*workspace_id/);
-  assert.deepEqual(plan.params, [23, "workspace-b"]);
-});
+  assert.deepEqual(plan.params, [23, PUBLIC_DEMO_WORKSPACE_ID]);
 
-test("list filters and inserted records are bound to the authorized workspace", () => {
-  const filter = dialect.sqlToQuery(
-    workspaceFilter(discoveriesTable.workspaceId, "workspace-private"),
+  assert.deepEqual(
+    assignWorkspace({ title: "Bridge" }, PUBLIC_DEMO_WORKSPACE_ID),
+    { title: "Bridge", workspaceId: PUBLIC_DEMO_WORKSPACE_ID },
   );
-  assert.match(filter.sql, /saved_discoveries.*workspace_id/);
-  assert.deepEqual(filter.params, ["workspace-private"]);
-
-  assert.deepEqual(assignWorkspace({ title: "Bridge" }, "workspace-private"), {
-    title: "Bridge",
-    workspaceId: "workspace-private",
-  });
 });
 
-test("migration preserves legacy rows as unowned and quarantined", async () => {
+test("workspace list filters exclude legacy and unrelated private records", () => {
+  for (const [table, column] of [
+    ["saved_discoveries", discoveriesTable.workspaceId],
+    ["activation_plans", plansTable.workspaceId],
+  ] as const) {
+    const filter = dialect.sqlToQuery(
+      workspaceFilter(column, PUBLIC_DEMO_WORKSPACE_ID),
+    );
+    assert.match(filter.sql, new RegExp(`${table}.*workspace_id`));
+    assert.deepEqual(filter.params, [PUBLIC_DEMO_WORKSPACE_ID]);
+  }
+});
+
+test("authentication migration remains additive and preserves existing data", async () => {
   const migration = await readFile(
     new URL(
       "../../../../lib/db/migrations/0001_auth_workspaces.sql",
@@ -61,9 +74,6 @@ test("migration preserves legacy rows as unowned and quarantined", async () => {
     "utf8",
   );
   assert.match(migration, /ADD COLUMN workspace_id uuid REFERENCES workspaces/);
-  assert.doesNotMatch(
-    migration,
-    /UPDATE\s+(saved_discoveries|activation_plans)/i,
-  );
+  assert.doesNotMatch(migration, /\b(?:UPDATE|DELETE FROM|DROP TABLE|DROP COLUMN)\b/i);
   assert.match(migration, /CREATE TABLE sessions/);
 });

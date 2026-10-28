@@ -9,14 +9,11 @@ import {
   runLiveActivationPlanner,
 } from "../lib/agent/activation-planner";
 import { providerRateLimit } from "../lib/provider-rate-limit";
-import { requireAuthentication, requireCsrf } from "../lib/security";
 
 const router: IRouter = Router();
 
 router.post(
   "/activation-plans/agent",
-  requireAuthentication,
-  requireCsrf,
   providerRateLimit,
   async (req, res): Promise<void> => {
     const parsed = GenerateActivationPlanWithAgentBody.safeParse(req.body);

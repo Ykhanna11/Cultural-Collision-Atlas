@@ -26,17 +26,16 @@ import {
 import { providerRateLimit } from "../lib/provider-rate-limit";
 import {
   assignWorkspace,
+  getPublicDemoWorkspaceId,
   ownedRecordFilter,
   workspaceFilter,
 } from "../lib/workspace-scope";
-import { requireAuthentication, requireCsrf } from "../lib/security";
+import { publicMutationRateLimit } from "../lib/public-mutation-rate-limit";
 
 const router: IRouter = Router();
 
 router.post(
   "/discoveries",
-  requireAuthentication,
-  requireCsrf,
   providerRateLimit,
   async (req, res): Promise<void> => {
     const parsed = DiscoverCulturalBridgesBody.safeParse(req.body);
@@ -175,16 +174,13 @@ router.post(
 
 router.get(
   "/discoveries/saved",
-  requireAuthentication,
-  async (req, res): Promise<void> => {
+  async (_req, res): Promise<void> => {
+    const workspaceId = await getPublicDemoWorkspaceId();
     const discoveries = await db
       .select()
       .from(savedDiscoveriesTable)
       .where(
-        workspaceFilter(
-          savedDiscoveriesTable.workspaceId,
-          req.session.workspaceId!,
-        ),
+        workspaceFilter(savedDiscoveriesTable.workspaceId, workspaceId),
       )
       .orderBy(desc(savedDiscoveriesTable.createdAt));
     res.json(ListSavedDiscoveriesResponse.parse(discoveries));
@@ -193,8 +189,7 @@ router.get(
 
 router.post(
   "/discoveries/saved",
-  requireAuthentication,
-  requireCsrf,
+  publicMutationRateLimit,
   async (req, res): Promise<void> => {
     const parsed = SaveDiscoveryBody.safeParse(req.body);
     if (!parsed.success) {
@@ -202,9 +197,10 @@ router.post(
       return;
     }
 
+    const workspaceId = await getPublicDemoWorkspaceId();
     const [discovery] = await db
       .insert(savedDiscoveriesTable)
-      .values(assignWorkspace(parsed.data, req.session.workspaceId!))
+      .values(assignWorkspace(parsed.data, workspaceId))
       .returning();
     res.status(201).json(SaveDiscoveryResponse.parse(discovery));
   },
@@ -212,8 +208,7 @@ router.post(
 
 router.delete(
   "/discoveries/saved/:id",
-  requireAuthentication,
-  requireCsrf,
+  publicMutationRateLimit,
   async (req, res): Promise<void> => {
     const parsed = DeleteSavedDiscoveryParams.safeParse(req.params);
     if (!parsed.success) {
@@ -221,6 +216,7 @@ router.delete(
       return;
     }
 
+    const workspaceId = await getPublicDemoWorkspaceId();
     const [deleted] = await db
       .delete(savedDiscoveriesTable)
       .where(
@@ -228,7 +224,7 @@ router.delete(
           savedDiscoveriesTable.id,
           savedDiscoveriesTable.workspaceId,
           parsed.data.id,
-          req.session.workspaceId!,
+          workspaceId,
         ),
       )
       .returning({ id: savedDiscoveriesTable.id });

@@ -16,37 +16,33 @@ import { searchQlooEntities } from "../lib/qloo/entities";
 import { requestQlooHeatmap } from "../lib/qloo/heatmap";
 import { getVenueSourceStatus } from "../lib/venue-source";
 import { providerRateLimit } from "../lib/provider-rate-limit";
-import { workspaceFilter } from "../lib/workspace-scope";
-import { requireAuthentication, requireCsrf } from "../lib/security";
+import {
+  getPublicDemoWorkspaceId,
+  workspaceFilter,
+} from "../lib/workspace-scope";
 
 const router: IRouter = Router();
 
-router.get("/qloo/status", requireAuthentication, (_req, res): void => {
+router.get("/qloo/status", (_req, res): void => {
   res.json(GetQlooStatusResponse.parse(getQlooStatus()));
 });
 
 router.get(
   "/atlas/overview",
-  requireAuthentication,
-  async (req, res): Promise<void> => {
+  async (_req, res): Promise<void> => {
+    const workspaceId = await getPublicDemoWorkspaceId();
     const [discoveries, plans] = await Promise.all([
       db
         .select({ value: count() })
         .from(savedDiscoveriesTable)
         .where(
-          workspaceFilter(
-            savedDiscoveriesTable.workspaceId,
-            req.session.workspaceId!,
-          ),
+          workspaceFilter(savedDiscoveriesTable.workspaceId, workspaceId),
         ),
       db
         .select({ value: count() })
         .from(activationPlansTable)
         .where(
-          workspaceFilter(
-            activationPlansTable.workspaceId,
-            req.session.workspaceId!,
-          ),
+          workspaceFilter(activationPlansTable.workspaceId, workspaceId),
         ),
     ]);
 
@@ -63,8 +59,6 @@ router.get(
 
 router.post(
   "/qloo/test",
-  requireAuthentication,
-  requireCsrf,
   providerRateLimit,
   async (req, res): Promise<void> => {
     const parsed = TestQlooConnectionBody.safeParse(req.body);
@@ -104,8 +98,6 @@ router.post(
 
 router.post(
   "/qloo/entities/search",
-  requireAuthentication,
-  requireCsrf,
   providerRateLimit,
   async (req, res): Promise<void> => {
     const parsed = SearchQlooEntitiesBody.safeParse(req.body);
@@ -143,8 +135,6 @@ router.post(
 
 router.post(
   "/opportunities/heatmap",
-  requireAuthentication,
-  requireCsrf,
   providerRateLimit,
   async (req, res): Promise<void> => {
     const parsed = GetOpportunityHeatmapBody.safeParse(req.body);
