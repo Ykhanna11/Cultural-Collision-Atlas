@@ -1,4 +1,7 @@
-import type { GeographicAnalysisResponse } from "@workspace/api-zod";
+import type {
+  AffinityScopeEvidence,
+  GeographicAnalysisResponse,
+} from "@workspace/api-zod";
 import {
   compareQlooAffinityQueries,
   normalizeQlooAffinityQuery,
@@ -158,6 +161,24 @@ export function analyzeUnifiedOpportunity(input: {
     joint: queries[2].status,
   };
 
+  const scopeEvidence = (query: (typeof queries)[number]): AffinityScopeEvidence => {
+    const evidence =
+      query.evidence.find(({ candidate }) => candidate.entityId === candidateId) ?? null;
+    const affinity = evidence?.providerValues.affinity;
+    const affinityRank = evidence?.providerValues.affinityRank;
+
+    return {
+      queryStatus: query.status as AffinityScopeEvidence["queryStatus"],
+      inputEntityIds: query.query.inputEntityIds,
+      candidatePresence: evidence ? "returned" : "not_returned",
+      affinityStatus: (affinity?.state ?? "unavailable") as AffinityScopeEvidence["affinityStatus"],
+      affinity: affinity?.state === "returned" ? affinity.value : null,
+      affinityRankStatus: (affinityRank?.state ?? "unavailable") as AffinityScopeEvidence["affinityRankStatus"],
+      affinityRank: affinityRank?.state === "returned" ? affinityRank.value : null,
+      sourceReference: evidence?.source.reference ?? "Qloo Insights API",
+    };
+  };
+
   return {
     version: "opportunity-analysis/1",
     analysisReference: context.analysisReference,
@@ -165,6 +186,8 @@ export function analyzeUnifiedOpportunity(input: {
     candidateName: candidate.name,
     affinity: {
       queryStatuses,
+      interestAEvidence: scopeEvidence(queries[0]),
+      interestBEvidence: scopeEvidence(queries[1]),
       jointAffinityStatus: jointAffinity?.state ?? "unavailable",
       jointAffinity: jointAffinity?.state === "returned" ? jointAffinity.value : null,
       jointAffinityRank:

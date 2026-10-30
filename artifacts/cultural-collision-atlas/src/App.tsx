@@ -50,6 +50,7 @@ import { GeographicSummaryPanel } from '@/components/geographic-summary';
 import { AffinityComparisonPanel } from '@/components/affinity-comparison';
 import { OpportunityScorecard } from '@/components/opportunity-scorecard';
 import { clearSelectedVenueSession, clearVenueDraftSession } from '@/lib/venue-session';
+import { getStaleAnalysisNotice } from '@/lib/stale-analysis';
 
 const queryClient = new QueryClient();
 const VenueMap = lazy(async () => {
@@ -690,6 +691,7 @@ function AtlasPage() {
   });
   const [venues, setVenues] = useState<Venue[]>([]);
   const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
+  const [venueReadinessNotice, setVenueReadinessNotice] = useState<string | null>(null);
   const [shortlistedVenues, setShortlistedVenues] = useState<Record<string, Venue>>(() =>
     Object.fromEntries(readSelectedVenues().map((venue) => [venue.providerVenueId, venue])),
   );
@@ -703,6 +705,7 @@ function AtlasPage() {
   ), []);
   const handleVenueSelect = useCallback((venue: Venue) => {
     setSelectedVenue(venue);
+    setVenueReadinessNotice(null);
     let interests: { interestA?: string; interestB?: string; candidate?: BridgeCandidate } = {};
     try {
       const rawDraft = sessionStorage.getItem('atlas:draft-plan');
@@ -760,8 +763,13 @@ function AtlasPage() {
                 ...(result.analysis && { analysis: result.analysis }),
               });
             },
+            onError: () => {
+              setVenueReadinessNotice('The selected venue is not part of the active geographic result. Run Discovery again to refresh the source context and re-check readiness.');
+            },
           });
+          return;
         }
+        setVenueReadinessNotice('The selected venue is not part of the active geographic result. Run Discovery again to refresh the source context and re-check readiness.');
       },
     });
   }, [analysisContext, city, entityId, entityQuery, geographicAnalysis, venueCategory, venueSuitability]);
@@ -868,12 +876,22 @@ function AtlasPage() {
     return { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLon: Math.min(...lons), maxLon: Math.max(...lons) };
   }, [points]);
   const selectedVenueAssessment = selectedVenue ? venueAssessments[selectedVenue.providerVenueId] : undefined;
+  const staleAnalysisNotice = useMemo(() =>
+    getStaleAnalysisNotice({
+      analysisContext,
+      city,
+      entityId,
+      error: geographicAnalysis.error,
+    }),
+    [analysisContext, city, entityId, geographicAnalysis.error],
+  );
   return <div className="page-in">
     <PageTitle kicker="02 / geographic context" title="Opportunity Atlas" detail="Explore geography only when a connected source returns spatial evidence. No venue pins, addresses, or neighborhood claims are fabricated." right={<StatusPill status={status.data} />} />
     {venueProvider.isError && <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-100/[.035] p-4"><MapPin size={16} className="mt-0.5 shrink-0 text-[#dbb969]" /><div><div className="text-[12px] font-semibold text-[#ded1ac]">Venue provider status unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#928a77]">Venue discovery could not be reached. The existing heatmap remains available.</p></div></div>}
     {!venueProvider.isLoading && venueProvider.data && <div className={cx('mb-5 rounded-xl border px-4 py-3', venueProvider.data.configured ? 'border-emerald-100/15 bg-emerald-100/[.025]' : 'border-amber-100/15 bg-amber-100/[.025]')}><div className="text-[10px] font-semibold text-[#cbd1df]">Primary venue source · Overture Maps Places</div><p className="mt-1 text-[9px] leading-5 text-[#929db1]">{venueProvider.data.message}</p></div>}
     {!status.isLoading && !status.data?.configured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-white/[.09] bg-white/[.02] p-4"><Globe2 size={16} className="mt-0.5 shrink-0 text-[#858fa4]" /><div><div className="text-[12px] font-semibold text-[#bdc4d2]">Heatmap source unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">Qloo is not configured for this workspace. Geographic signal requests are disabled until an administrator configures the source.</p></div></div>}
-    {geographicAnalysis.isError && analysisContext && <div role="alert" className="mb-5 rounded-lg border border-amber-100/15 bg-amber-100/[.035] px-4 py-3 text-[10px] leading-5 text-[#c5b78f]">This Discovery analysis reference expired or is unavailable. <Link href="/discover" className="underline underline-offset-2">Run Discovery again</Link> to refresh cultural evidence. Existing venue search and planner controls remain available.</div>}
+    {staleAnalysisNotice && <div role="alert" className="mb-5 rounded-lg border border-amber-100/15 bg-amber-100/[.035] px-4 py-3 text-[10px] leading-5 text-[#c5b78f]">{staleAnalysisNotice} <Link href="/discover" className="underline underline-offset-2">Run Discovery again</Link> to refresh the source context.</div>}
+    {venueReadinessNotice && <div role="alert" className="mb-5 rounded-lg border border-amber-100/15 bg-amber-100/[.035] px-4 py-3 text-[10px] leading-5 text-[#c5b78f]">{venueReadinessNotice}</div>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <Panel className="min-h-[490px]">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78849a]">Spatial evidence</div><h2 className="mt-1 text-[16px] font-semibold">Returned coordinate field</h2></div><span className="rounded-full border border-white/[.1] px-2 py-1 text-[9px] text-[#8c97aa]">Source dependent</span></div>

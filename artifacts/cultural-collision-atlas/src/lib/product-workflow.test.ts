@@ -16,6 +16,7 @@ import {
   type GeographicAnalysisSnapshot,
   type ActivationPlanDraft,
 } from "./product-workflow.ts";
+import { getStaleAnalysisNotice, isStaleAnalysisFailure } from "./stale-analysis.ts";
 import type {
   ActivationPlannerResponse,
   DiscoveryInput,
@@ -28,6 +29,55 @@ const candidateId = "20000000-0000-4000-8000-000000000001";
 const cityId = "30000000-0000-4000-8000-000000000001";
 const caveat =
   "Aggregate evidence does not establish that the same individuals share both interests.";
+
+test("stale analysis errors and context mismatches are distinguished from transient API failures", () => {
+  const staleReferenceError = {
+    status: 410,
+    message: "The Discovery analysis reference expired or is unavailable. Run Discovery again.",
+  };
+  const staleCandidateError = {
+    status: 400,
+    data: { error: "The selected bridge does not belong to this Discovery analysis." },
+  };
+  const transientError = {
+    status: 503,
+    message: "The Qloo API is temporarily unavailable.",
+  };
+  const validContext = {
+    analysisReference: "analysis-ref-1",
+    city: "London",
+    entityId: "candidate-1",
+    candidateName: "Bridge candidate",
+  };
+
+  assert.equal(isStaleAnalysisFailure(staleReferenceError), true);
+  assert.equal(isStaleAnalysisFailure(staleCandidateError), true);
+  assert.equal(isStaleAnalysisFailure(transientError), false);
+  assert.equal(getStaleAnalysisNotice({
+    analysisContext: validContext,
+    city: "London",
+    entityId: "candidate-1",
+    error: transientError,
+  }), null);
+  assert.match(getStaleAnalysisNotice({
+    analysisContext: validContext,
+    city: "Paris",
+    entityId: "candidate-1",
+    error: null,
+  }) ?? "", /Run Discovery again/i);
+  assert.match(getStaleAnalysisNotice({
+    analysisContext: validContext,
+    city: "London",
+    entityId: "candidate-2",
+    error: null,
+  }) ?? "", /Run Discovery again/i);
+  assert.match(getStaleAnalysisNotice({
+    analysisContext: validContext,
+    city: "London",
+    entityId: "candidate-1",
+    error: staleReferenceError,
+  }) ?? "", /Run Discovery again/i);
+});
 
 test("deterministic discovery-save-plan-reopen workflow preserves evidence and caveats", () => {
   const localityResponse = {
