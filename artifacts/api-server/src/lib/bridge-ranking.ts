@@ -2,6 +2,16 @@ import { isRecord } from "./qloo/client";
 import { isQlooEntityId } from "./qloo/entities";
 import type { QlooRecommendationType } from "./qloo/insights";
 import { buildTasteAnalysisEvidence } from "./qloo/taste-analysis";
+import {
+  compareQlooAffinityQueries,
+  describeAffinityScopeComparison,
+  normalizeQlooAffinityQuery,
+} from "./cultural-intelligence/affinity";
+import type {
+  AffinityQueryContext,
+  NormalizedAffinityEvidence,
+  NormalizedAffinityQuery,
+} from "./cultural-intelligence/evidence";
 
 interface RankedEntity {
   id: string;
@@ -11,6 +21,7 @@ interface RankedEntity {
   explainability: unknown;
   localityCityEntityId: string | null;
   tags: unknown;
+  affinityEvidence: NormalizedAffinityEvidence;
 }
 
 interface InputAttribution {
@@ -21,50 +32,24 @@ interface InputAttribution {
 
 type AttributionStrength = "two_sided" | "one_sided" | "unavailable";
 
-function readRankedEntities(value: unknown): RankedEntity[] {
-  const results =
-    isRecord(value) && isRecord(value.results) ? value.results : null;
-  const entities = results?.entities;
-  if (!Array.isArray(entities)) {
+function readRankedEntities(query: NormalizedAffinityQuery): RankedEntity[] {
+  if (query.status === "invalid" && query.invalidCandidateCount === 0) {
     throw new Error("Qloo insights returned an unrecognized entity result shape.");
   }
-
-  return entities.flatMap((entity): RankedEntity[] => {
-    if (!isRecord(entity)) return [];
-    const id = entity.entity_id;
-    const name = entity.name;
-    if (typeof id !== "string" || typeof name !== "string") return [];
-    const query = isRecord(entity.query) ? entity.query : null;
-    const affinity = query?.affinity;
-    const affinityRank = query?.affinity_rank;
-    return [{
-      id,
-      name,
-      affinity:
-        typeof affinity === "number" &&
-        Number.isFinite(affinity) &&
-        affinity >= 0 &&
-        affinity <= 1
-          ? affinity
-          : null,
-      affinityRank:
-        typeof affinityRank === "number" &&
-        Number.isFinite(affinityRank) &&
-        Number.isInteger(affinityRank) &&
-        affinityRank >= 1
-          ? affinityRank
-          : null,
-      explainability: query?.explainability ?? null,
-      tags: entity.tags,
-      localityCityEntityId:
-        isRecord(entity.properties) &&
-        isRecord(entity.properties.locality) &&
-        isRecord(entity.properties.locality.city) &&
-        typeof entity.properties.locality.city.entity_id === "string"
-          ? entity.properties.locality.city.entity_id
-          : null,
-    }];
-  });
+  return query.evidence.map((evidence): RankedEntity => ({
+    id: evidence.candidate.entityId,
+    name: evidence.candidate.name,
+    affinity: evidence.providerValues.affinity.state === "returned"
+      ? evidence.providerValues.affinity.value
+      : null,
+    affinityRank: evidence.providerValues.affinityRank.state === "returned"
+      ? evidence.providerValues.affinityRank.value
+      : null,
+    explainability: evidence.explainability.providerValue,
+    tags: evidence.candidate.tags,
+    localityCityEntityId: evidence.candidate.localityCityEntityId,
+    affinityEvidence: evidence,
+  }));
 }
 
 export type LocalityStatus =
@@ -120,28 +105,17 @@ function recommendationTypeLabel(type: QlooRecommendationType): string {
 }
 
 function readInputAttribution(
-  value: unknown,
+  evidence: NormalizedAffinityEvidence,
   inputEntities: Array<{ id: string; name: string }>,
 ): InputAttribution[] {
-  if (!isRecord(value)) return [];
-
-  const signals = value["signal.interests.entities"];
-  if (!Array.isArray(signals)) return [];
-
   const seen = new Set<string>();
-  return signals.flatMap((signal): InputAttribution[] => {
-    if (!isRecord(signal) || typeof signal.entity_id !== "string") return [];
-    if (seen.has(signal.entity_id)) return [];
-    const entity = inputEntities.find(({ id }) => id === signal.entity_id);
-    if (
-      !entity ||
-      typeof signal.score !== "number" ||
-      !Number.isFinite(signal.score) ||
-      signal.score <= 0
-    ) {
+  return evidence.explainability.inputAttributions.flatMap((signal): InputAttribution[] => {
+    if (!signal.matchesInput || !signal.positive || seen.has(signal.entityId)) return [];
+    const entity = inputEntities.find(({ id }) => id === signal.entityId);
+    if (!entity) {
       return [];
     }
-    seen.add(signal.entity_id);
+    seen.add(signal.entityId);
     return [{ id: entity.id, interest: entity.name, score: signal.score }];
   });
 }
@@ -183,6 +157,8 @@ export function rankBridgeCandidates(input: {
   interestBId: string;
   recommendationType: QlooRecommendationType;
   selectedCityEntityId?: string;
+  city?: string;
+  analysisReference?: string;
   tasteAnalysis?: {
     interestA: unknown;
     interestB: unknown;
@@ -191,9 +167,29 @@ export function rankBridgeCandidates(input: {
   resultsB: unknown;
   jointResults: unknown;
 }) {
-  const interestA = readRankedEntities(input.resultsA);
-  const interestB = readRankedEntities(input.resultsB);
-  const joint = readRankedEntities(input.jointResults);
+  const analysisReference = input.analysisReference ?? "bridge-ranking-call";
+  const queryContext = (
+    requestReference: string,
+    scope: AffinityQueryContext["scope"],
+    inputEntityIds: string[],
+  ): AffinityQueryContext => ({
+    analysisReference,
+    requestReference,
+    scope,
+    inputEntityIds,
+    recommendationType: input.recommendationType,
+    city: input.city ?? "",
+    cityEntityId: input.selectedCityEntityId,
+  });
+  const affinityQueries = [
+    normalizeQlooAffinityQuery(input.resultsA, queryContext("single-interest-a", "single_interest", [input.interestAId])),
+    normalizeQlooAffinityQuery(input.resultsB, queryContext("single-interest-b", "single_interest", [input.interestBId])),
+    normalizeQlooAffinityQuery(input.jointResults, queryContext("joint-interest", "joint_interest", [input.interestAId, input.interestBId])),
+  ];
+  const affinityComparison = compareQlooAffinityQueries(affinityQueries);
+  const interestA = readRankedEntities(affinityQueries[0]);
+  const interestB = readRankedEntities(affinityQueries[1]);
+  const joint = readRankedEntities(affinityQueries[2]);
   const categoryLabel = recommendationTypeLabel(input.recommendationType);
   const byIdB = new Map(interestB.map((entity) => [entity.id, entity]));
   const byIdA = new Map(interestA.map((entity) => [entity.id, entity]));
@@ -208,7 +204,7 @@ export function rankBridgeCandidates(input: {
       [input.interestB, byIdB.get(candidate.id)],
     ] as const;
     const score = scoreFromQlooSignals(candidate);
-    const inputAttributions = readInputAttribution(candidate.explainability, [
+    const inputAttributions = readInputAttribution(candidate.affinityEvidence, [
       { id: input.interestAId, name: input.interestA },
       { id: input.interestBId, name: input.interestB },
     ]);
@@ -264,6 +260,12 @@ export function rankBridgeCandidates(input: {
               }]
             : [],
         ),
+        {
+          source: "Qloo Insights API",
+          label: "Affinity by query scope",
+          value: describeAffinityScopeComparison(affinityComparison, candidate.id),
+          kind: "derived" as const,
+        },
         {
           source: "Qloo Insights API",
           label: "Per-result input attribution",
