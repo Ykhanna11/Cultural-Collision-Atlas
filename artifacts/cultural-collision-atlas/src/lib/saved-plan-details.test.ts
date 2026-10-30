@@ -39,6 +39,7 @@ test("saved plan details separate persisted evidence and planning content", () =
       budgetStatus: "User-supplied planning input only.",
       strategySource: null,
       userProvidedAssumptions: [],
+      selectedVenue: null,
     },
   );
 });
@@ -56,6 +57,7 @@ test("older or incomplete saved plans return empty details without throwing", ()
       budgetStatus: null,
       strategySource: null,
       userProvidedAssumptions: [],
+      selectedVenue: null,
     },
   );
   assert.deepEqual(getSavedPlanDetails(null), {
@@ -68,5 +70,33 @@ test("older or incomplete saved plans return empty details without throwing", ()
     budgetStatus: null,
     strategySource: null,
     userProvidedAssumptions: [],
+    selectedVenue: null,
   });
+});
+
+test("saved plan details reopen persisted venue facts and assessment evidence", () => {
+  const details = getSavedPlanDetails({
+    selectedVenue: {
+      provider: "openstreetmap",
+      providerVenueId: "node-123",
+      name: "Community Hall",
+      address: "1 Main Street",
+      latitude: 51.5,
+      longitude: -0.1,
+      categories: ["culture", "event_space"],
+      attribution: "© OpenStreetMap contributors, ODbL",
+      retrievedAt: "2026-10-30T00:00:00.000Z",
+      suitability: {
+        score: 65,
+        scoreLabel: "Operational data completeness and category fit",
+        explanation: "Provider facts are available; cultural relevance remains unverified.",
+        evidence: [{ kind: "qloo_evidence", label: "Bridge evidence", value: "Qloo returned a matching cultural bridge (Qloo Insights API)" }],
+        missingData: ["No venue capacity was provided."],
+      },
+    },
+  });
+  assert.equal(details.selectedVenue?.name, "Community Hall");
+  assert.equal(details.selectedVenue?.providerVenueId, "node-123");
+  assert.deepEqual(details.selectedVenue?.categories, ["culture", "event_space"]);
+  assert.equal(details.selectedVenue?.suitability?.evidence[0]?.kind, "qloo_evidence");
 });

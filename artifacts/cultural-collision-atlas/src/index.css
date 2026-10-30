@@ -123,3 +123,24 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+.venue-map-marker {
+  border: 0;
+  background: transparent;
+}
+.venue-map-marker span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(230, 238, 255, .9);
+  border-radius: 50% 50% 50% 0;
+  background: #67d9e2;
+  box-shadow: 0 4px 14px rgba(103, 217, 226, .35);
+  transform: rotate(-45deg);
+  transition: transform .18s ease, background .18s ease;
+}
+.venue-map-marker span.venue-map-marker-selected {
+  background: #a995f1;
+  box-shadow: 0 0 0 5px rgba(169, 149, 241, .16);
+  transform: rotate(-45deg) scale(1.18);
+}

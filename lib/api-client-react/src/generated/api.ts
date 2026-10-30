@@ -36,7 +36,12 @@ import type {
   QlooTestInput,
   SaveDiscoveryInput,
   SavePlanInput,
-  SavedDiscovery
+  SavedDiscovery,
+  VenueProviderStatus,
+  VenueSearchInput,
+  VenueSearchResponse,
+  VenueSuitabilityInput,
+  VenueSuitabilityResponse
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1216,5 +1221,241 @@ export const useGetOpportunityHeatmap = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getGetOpportunityHeatmapMutationOptions(options));
+    }
+
+export const getGetVenueProviderStatusUrl = () => {
+
+
+
+
+  return `/api/opportunities/venues/status`
+}
+
+export const getVenueProviderStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<VenueProviderStatus> => {
+
+  return customFetch<VenueProviderStatus>(getGetVenueProviderStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVenueProviderStatusQueryKey = () => {
+    return [
+    `/api/opportunities/venues/status`
+    ] as const;
+    }
+
+
+export const getGetVenueProviderStatusQueryOptions = <TData = Awaited<ReturnType<typeof getVenueProviderStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVenueProviderStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVenueProviderStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVenueProviderStatus>>> = ({ signal }) => getVenueProviderStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVenueProviderStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVenueProviderStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getVenueProviderStatus>>>
+export type GetVenueProviderStatusQueryError = ErrorType<unknown>
+
+
+
+export function useGetVenueProviderStatus<TData = Awaited<ReturnType<typeof getVenueProviderStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVenueProviderStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVenueProviderStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSearchVenuesUrl = () => {
+
+
+
+
+  return `/api/opportunities/venues/search`
+}
+
+export const searchVenues = async (venueSearchInput: VenueSearchInput, options?: Parameters<typeof customFetch>[1]): Promise<VenueSearchResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<VenueSearchResponse>(getSearchVenuesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(venueSearchInput)
+  }
+);}
+
+
+
+
+
+export const getSearchVenuesMutationKey = () => ['searchVenues'] as const;
+
+export const getSearchVenuesMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof searchVenues>>, TError,SearchVenuesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof searchVenues>>, TError,SearchVenuesMutationVariables, TContext> => {
+
+const mutationKey = getSearchVenuesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof searchVenues>>, SearchVenuesMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  searchVenues(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SearchVenuesMutationResult = NonNullable<Awaited<ReturnType<typeof searchVenues>>>
+    export type SearchVenuesMutationBody = BodyType<VenueSearchInput>
+    export type SearchVenuesMutationError = ErrorType<ErrorResponse>
+    export type SearchVenuesMutationVariables = {data: BodyType<VenueSearchInput>}
+
+    export const useSearchVenues = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof searchVenues>>, TError,SearchVenuesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof searchVenues>>,
+        TError,
+        SearchVenuesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSearchVenuesMutationOptions(options));
+    }
+
+export const getAssessVenueSuitabilityUrl = (providerVenueId: string,) => {
+
+
+
+
+  return `/api/opportunities/venues/${providerVenueId}/suitability`
+}
+
+export const assessVenueSuitability = async (providerVenueId: string,
+    venueSuitabilityInput: VenueSuitabilityInput, options?: Parameters<typeof customFetch>[1]): Promise<VenueSuitabilityResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<VenueSuitabilityResponse>(getAssessVenueSuitabilityUrl(providerVenueId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(venueSuitabilityInput)
+  }
+);}
+
+
+
+
+
+export const getAssessVenueSuitabilityMutationKey = () => ['assessVenueSuitability'] as const;
+
+export const getAssessVenueSuitabilityMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assessVenueSuitability>>, TError,AssessVenueSuitabilityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof assessVenueSuitability>>, TError,AssessVenueSuitabilityMutationVariables, TContext> => {
+
+const mutationKey = getAssessVenueSuitabilityMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof assessVenueSuitability>>, AssessVenueSuitabilityMutationVariables> = (props) => {
+          const {providerVenueId,data} = props ?? {};
+
+          return  assessVenueSuitability(providerVenueId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AssessVenueSuitabilityMutationResult = NonNullable<Awaited<ReturnType<typeof assessVenueSuitability>>>
+    export type AssessVenueSuitabilityMutationBody = BodyType<VenueSuitabilityInput>
+    export type AssessVenueSuitabilityMutationError = ErrorType<ErrorResponse>
+    export type AssessVenueSuitabilityMutationVariables = {providerVenueId: string;data: BodyType<VenueSuitabilityInput>}
+
+    export const useAssessVenueSuitability = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assessVenueSuitability>>, TError,AssessVenueSuitabilityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof assessVenueSuitability>>,
+        TError,
+        AssessVenueSuitabilityMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAssessVenueSuitabilityMutationOptions(options));
     }
 

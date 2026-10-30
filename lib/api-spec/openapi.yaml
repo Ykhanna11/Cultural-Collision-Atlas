@@ -278,6 +278,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /opportunities/venues/status:
+    get:
+      operationId: getVenueProviderStatus
+      tags: [opportunities]
+      responses:
+        "200":
+          description: Venue provider availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VenueProviderStatus"
+  /opportunities/venues/search:
+    post:
+      operationId: searchVenues
+      tags: [opportunities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VenueSearchInput"
+      responses:
+        "200":
+          description: Normalized OpenStreetMap venues
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VenueSearchResponse"
+        "502":
+          description: Venue provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /opportunities/venues/{providerVenueId}/suitability:
+    post:
+      operationId: assessVenueSuitability
+      tags: [opportunities]
+      parameters:
+        - in: path
+          name: providerVenueId
+          required: true
+          schema: { type: string, maxLength: 160 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VenueSuitabilityInput"
+      responses:
+        "200":
+          description: Evidence-labelled venue suitability assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VenueSuitabilityResponse"
+        "404":
+          description: Venue is not in the current provider cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -652,3 +714,98 @@ components:
           $ref: "#/components/schemas/QlooStatus"
         venueProviderConfigured: { type: boolean }
       required: [savedDiscoveries, savedPlans, qloo, venueProviderConfigured]
+    VenueBoundingBox:
+      type: object
+      properties:
+        south: { type: number, minimum: -90, maximum: 90 }
+        west: { type: number, minimum: -180, maximum: 180 }
+        north: { type: number, minimum: -90, maximum: 90 }
+        east: { type: number, minimum: -180, maximum: 180 }
+      required: [south, west, north, east]
+    Venue:
+      type: object
+      properties:
+        provider: { type: string, enum: [openstreetmap, overture] }
+        providerVenueId: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        address: { type: string }
+        categories: { type: array, items: { type: string } }
+        website: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        rating: { type: number }
+        ratingCount: { type: integer }
+        openingHours: { type: string }
+        attribution: { type: string }
+        retrievedAt: { type: string, format: date-time }
+      required: [provider, providerVenueId, name, latitude, longitude, categories, attribution, retrievedAt]
+    VenueProviderStatus:
+      type: object
+      properties:
+        configured: { type: boolean }
+        state: { type: string, enum: [reachable, unavailable, unknown] }
+        message: { type: string }
+      required: [configured, state, message]
+    VenueSearchInput:
+      type: object
+      properties:
+        bbox: { $ref: "#/components/schemas/VenueBoundingBox" }
+        radius:
+          type: object
+          properties:
+            latitude: { type: number, minimum: -90, maximum: 90 }
+            longitude: { type: number, minimum: -180, maximum: 180 }
+            kilometers: { type: number, minimum: 0.1, maximum: 25 }
+          required: [latitude, longitude, kilometers]
+        categories:
+          type: array
+          items:
+            type: string
+            enum: [restaurant, cafe, shopping, entertainment, sports, culture, museum, event_space]
+        query: { type: string, maxLength: 120 }
+        limit: { type: integer, minimum: 1, maximum: 50, default: 25 }
+      required: [categories]
+    VenueSearchResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [openstreetmap, overture] }
+        venues:
+          type: array
+          items: { $ref: "#/components/schemas/Venue" }
+        attribution: { type: string }
+      required: [source, venues, attribution]
+    VenueSuitabilityEvidence:
+      type: object
+      properties:
+        kind: { type: string, enum: [venue_fact, category_match, geographic_context, bridge_evidence, qloo_evidence, missing_data] }
+        label: { type: string }
+        value: { type: string }
+      required: [kind, label, value]
+    VenueSuitabilityInput:
+      type: object
+      properties:
+        interestA: { type: string, minLength: 1, maxLength: 120 }
+        interestB: { type: string, minLength: 1, maxLength: 120 }
+        bridgeName: { type: string, maxLength: 160 }
+        categories:
+          type: array
+          items: { type: string, maxLength: 80 }
+          maxItems: 20
+        qlooEvidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvidenceItem"
+      required: [interestA, interestB]
+    VenueSuitabilityResponse:
+      type: object
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        scoreLabel: { type: string }
+        explanation: { type: string }
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/VenueSuitabilityEvidence" }
+        missingData: { type: array, items: { type: string } }
+      required: [score, scoreLabel, explanation, evidence, missingData]

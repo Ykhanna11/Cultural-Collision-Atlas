@@ -10,6 +10,40 @@ export interface ActivationPlanDraft {
   form: DiscoveryInput;
   candidate: BridgeCandidate;
   response: DiscoveryResponse;
+  venue?: {
+    providerVenueId: string;
+    name: string;
+    address?: string;
+    latitude: number;
+    longitude: number;
+    categories: string[];
+    attribution: string;
+    retrievedAt?: string;
+  };
+  venueSuitability?: VenueSuitabilityContext;
+}
+
+export interface VenueSuitabilityContext {
+  score: number;
+  scoreLabel: string;
+  explanation: string;
+  evidence: Array<{
+    kind: string;
+    label: string;
+    value: string;
+  }>;
+  missingData: string[];
+}
+
+export function buildSelectedVenueSection(draft: ActivationPlanDraft) {
+  if (!draft.venue) return null;
+  const suitability = draft.venueSuitability
+    ? `\nVenue assessment: ${draft.venueSuitability.scoreLabel}. ${draft.venueSuitability.explanation}\nEvidence: ${draft.venueSuitability.evidence.map((item) => `${item.label}: ${item.value}`).join(" | ") || "No evidence returned."}${draft.venueSuitability.missingData.length ? `\nMissing data: ${draft.venueSuitability.missingData.join("; ")}` : ""}`
+    : "\nVenue assessment: not requested.";
+  return {
+    title: "Selected venue · provider facts",
+    content: `Provider-sourced venue facts: ${draft.venue.name}; address: ${draft.venue.address ?? "not provided"}; coordinates: ${draft.venue.latitude.toFixed(5)}, ${draft.venue.longitude.toFixed(5)}; provider ID: ${draft.venue.providerVenueId}; categories: ${draft.venue.categories.join(", ") || "not provided"}; source: ${draft.venue.attribution}.${suitability}\nAI recommendations are hypotheses and do not confirm venue availability, suitability, permissions, accessibility, capacity, costs, or campaign outcomes.`,
+  };
 }
 
 export function buildDiscoverySaveInput(
@@ -50,8 +84,9 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
       },
       {
         title: "Venue options",
-        content:
-          "None sourced. No venue-data provider is connected, so no venue names, addresses, capacities, availability, or suitability claims are included.",
+        content: draft.venue
+          ? `Provider-sourced venue: ${draft.venue.name}${draft.venue.address ? `, ${draft.venue.address}` : ""}. Categories: ${draft.venue.categories.join(", ") || "not provided"}. Coordinates: ${draft.venue.latitude.toFixed(5)}, ${draft.venue.longitude.toFixed(5)}. Verify suitability, availability, accessibility, permissions, capacity and costs before planning.`
+          : "None sourced. No venue has been selected, so no venue names, addresses, capacities, availability, or suitability claims are included.",
       },
       {
         title: "Budget breakdown",
@@ -95,6 +130,22 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
       "No venue, partner, permit, or supplier quote has been confirmed.",
       "Costs, attendance, and campaign outcomes are not estimates or guarantees.",
     ],
+  };
+}
+
+export function buildActivationPlanExportPayload(
+  title: string,
+  draft: ActivationPlanDraft,
+  planContent: ReturnType<typeof buildActivationPlanContent>,
+  agentResult?: ActivationPlannerResponse,
+) {
+  return {
+    title,
+    city: draft.form.city,
+    interests: [draft.form.interestA, draft.form.interestB],
+    bridge: draft.candidate.name,
+    objective: draft.form.objective,
+    plan: buildActivationPlanSaveInput(title, draft, planContent, agentResult).plan,
   };
 }
 
@@ -187,6 +238,7 @@ export function buildActivationPlanSaveInput(
   const strategySections = agentResult
     ? buildActivationStrategySections(agentResult.strategy)
     : [];
+  const selectedVenueSection = buildSelectedVenueSection(draft);
   return {
     title,
     city: draft.form.city,
@@ -196,7 +248,15 @@ export function buildActivationPlanSaveInput(
     objective: draft.form.objective,
     plan: {
       ...plan,
-      sections: aiGenerated ? strategySections : plan.sections,
+      sections: aiGenerated
+        ? [...strategySections, ...(selectedVenueSection ? [selectedVenueSection] : [])]
+        : plan.sections,
+      ...(draft.venue && {
+        selectedVenue: {
+          ...draft.venue,
+          ...(draft.venueSuitability && { suitability: draft.venueSuitability }),
+        },
+      }),
       strategySource: agentResult?.source ?? "deterministic_fallback",
       ...(agentResult && {
         strategy: agentResult.strategy,

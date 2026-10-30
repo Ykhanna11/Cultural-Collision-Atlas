@@ -7,13 +7,15 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "test": "pnpm run build && PORT=${PORT:-10000} BASE_PATH=${BASE_PATH:-/} pnpm --filter @workspace/cultural-collision-atlas run build && pnpm --filter @workspace/scripts exec tsx --test ../artifacts/api-server/src/lib/agent/activation-planner.test.ts ../artifacts/api-server/src/lib/agent/openai-planner-model.test.ts ../artifacts/api-server/src/lib/workspace-scope.test.ts ../artifacts/api-server/src/routes.integration.test.ts ../artifacts/api-server/src/app.wiring.test.ts ../artifacts/cultural-collision-atlas/src/lib/product-workflow.test.ts",
+    "test": "pnpm run build && PORT=${PORT:-10000} BASE_PATH=${BASE_PATH:-/} pnpm --filter @workspace/cultural-collision-atlas run build && pnpm --filter @workspace/scripts exec tsx --test ../artifacts/api-server/src/lib/agent/activation-planner.test.ts ../artifacts/api-server/src/lib/agent/openai-planner-model.test.ts ../artifacts/api-server/src/lib/workspace-scope.test.ts ../artifacts/api-server/src/lib/openstreetmap.test.ts ../artifacts/api-server/src/lib/venue-suitability.test.ts ../artifacts/api-server/src/routes.integration.test.ts ../artifacts/api-server/src/app.wiring.test.ts ../artifacts/cultural-collision-atlas/src/lib/product-workflow.test.ts ../artifacts/cultural-collision-atlas/src/lib/venue-session.test.ts ../artifacts/cultural-collision-atlas/src/lib/saved-plan-details.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
+    "duckdb": "^1.4.4",
+    "duckdb": "1.4.4",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.1",
     "openai": "^7.45.0",

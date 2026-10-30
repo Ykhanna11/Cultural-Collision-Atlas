@@ -13,6 +13,7 @@ export interface SavedPlanEvidence {
 export interface SavedPlanDetails {
   sections: SavedPlanSection[];
   evidence: SavedPlanEvidence[];
+  selectedVenue: SavedPlanVenue | null;
   source: string | null;
   caveat: string | null;
   assumptions: string[];
@@ -20,6 +21,31 @@ export interface SavedPlanDetails {
   budgetStatus: string | null;
   strategySource: "ai_generated" | "deterministic_fallback" | null;
   userProvidedAssumptions: string[];
+}
+
+export interface SavedPlanVenue {
+  providerVenueId: string;
+  name: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  categories: string[];
+  provider: string;
+  attribution: string;
+  retrievedAt?: string;
+  suitability?: {
+    score: number;
+    scoreLabel: string;
+    explanation: string;
+    evidence: SavedPlanEvidenceItem[];
+    missingData: string[];
+  };
+}
+
+export interface SavedPlanEvidenceItem {
+  kind: string;
+  label: string;
+  value: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,10 +95,63 @@ export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
   const planningEstimates = isRecord(record.planningEstimates)
     ? record.planningEstimates
     : {};
+  const venue = isRecord(record.selectedVenue) ? record.selectedVenue : null;
+  const selectedVenue: SavedPlanVenue | null =
+    venue &&
+    nonEmptyString(venue.providerVenueId) &&
+    nonEmptyString(venue.name) &&
+    typeof venue.latitude === "number" &&
+    typeof venue.longitude === "number" &&
+    Array.isArray(venue.categories) &&
+    nonEmptyString(venue.attribution)
+      ? {
+          providerVenueId: venue.providerVenueId as string,
+          name: venue.name as string,
+          ...(nonEmptyString(venue.address) ? { address: venue.address as string } : {}),
+          latitude: venue.latitude,
+          longitude: venue.longitude,
+          categories: venue.categories.flatMap((category) =>
+            typeof category === "string" && category.trim()
+              ? [category.trim()]
+              : [],
+          ),
+          provider: typeof venue.provider === "string" ? venue.provider : "openstreetmap",
+          attribution: venue.attribution as string,
+          ...(nonEmptyString(venue.retrievedAt) ? { retrievedAt: venue.retrievedAt as string } : {}),
+          ...(isRecord(venue.suitability) &&
+          typeof venue.suitability.score === "number" &&
+          nonEmptyString(venue.suitability.scoreLabel) &&
+          nonEmptyString(venue.suitability.explanation)
+            ? {
+                suitability: {
+                  score: venue.suitability.score,
+                  scoreLabel: venue.suitability.scoreLabel as string,
+                  explanation: venue.suitability.explanation as string,
+                  evidence: Array.isArray(venue.suitability.evidence)
+                    ? venue.suitability.evidence.flatMap((item): SavedPlanEvidenceItem[] => {
+                        if (!isRecord(item)) return [];
+                        const label = nonEmptyString(item.label);
+                        const value = nonEmptyString(item.value);
+                        return typeof item.kind === "string" && label && value
+                          ? [{ kind: item.kind, label, value }]
+                          : [];
+                      })
+                    : [],
+                  missingData: Array.isArray(venue.suitability.missingData)
+                    ? venue.suitability.missingData.flatMap((item) =>
+                        typeof item === "string" && item.trim() ? [item.trim()] : [],
+                      )
+                    : [],
+                },
+              }
+            : {}),
+        }
+      : null;
 
   return {
     sections,
     evidence,
+    selectedVenue,
     source: nonEmptyString(record.source),
     caveat: nonEmptyString(record.caveat),
     assumptions,

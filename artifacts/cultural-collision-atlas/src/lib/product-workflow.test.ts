@@ -8,6 +8,7 @@ import { responseContainsCityLocality } from "../../../api-server/src/lib/qloo/e
 import { getSavedPlanDetails } from "./saved-plan-details.ts";
 import {
   buildActivationPlanContent,
+  buildActivationPlanExportPayload,
   buildActivationPlanSaveInput,
   buildDiscoverySaveInput,
   getSavedDiscoveryDetails,
@@ -142,7 +143,27 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     discoveryPayload.result.selectedBridge.evidence,
   );
 
-  const draft: ActivationPlanDraft = { form, candidate, response };
+  const draft: ActivationPlanDraft = {
+    form,
+    candidate,
+    response,
+    venue: {
+      providerVenueId: "node-123",
+      name: "Community Hall",
+      address: "1 Main Street",
+      latitude: 40.71,
+      longitude: -74.01,
+      categories: ["culture"],
+      attribution: "© OpenStreetMap contributors, ODbL",
+    },
+    venueSuitability: {
+      score: 65,
+      scoreLabel: "Operational data completeness and category fit",
+      explanation: "Venue facts are provider sourced; cultural relevance is unverified.",
+      evidence: [{ kind: "venue_fact", label: "Venue category", value: "culture" }],
+      missingData: ["Website unavailable"],
+    },
+  };
   const planContent = buildActivationPlanContent(draft);
   const planPayload = buildActivationPlanSaveInput(
     "New York cultural bridge",
@@ -177,6 +198,19 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
         "aggregate affinity evidence does not establish",
       ),
     ),
+  );
+  const exportPayload = buildActivationPlanExportPayload(
+    "New York cultural bridge",
+    draft,
+    planContent,
+  );
+  assert.deepEqual(
+    exportPayload.plan.selectedVenue,
+    planPayload.plan.selectedVenue,
+  );
+  assert.equal(
+    exportPayload.plan.selectedVenue.suitability.evidence[0]?.label,
+    "Venue category",
   );
 
   const strategy: ActivationPlannerResponse["strategy"] = {
@@ -250,6 +284,14 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
   assert.deepEqual(agentPlanPayload.plan.agent, agentResult);
   assert.deepEqual(agentPlanPayload.plan.strategy, strategy);
   assert.equal(agentPlanPayload.plan.strategySource, "ai_generated");
+  assert.ok(agentPlanPayload.plan.sections.some((section) =>
+    section.title.includes("Selected venue") &&
+    section.content.includes("node-123") &&
+    section.content.includes("Community Hall") &&
+    section.content.includes("OpenStreetMap contributors"),
+  ));
+  assert.equal(agentPlanPayload.plan.selectedVenue.providerVenueId, "node-123");
+  assert.equal(agentPlanPayload.plan.selectedVenue.suitability.score, 65);
   assert.ok(agentPlanPayload.plan.sections.some((section) =>
     section.content.includes("qloo-1-1"),
   ));

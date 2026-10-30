@@ -600,3 +600,187 @@ export interface AtlasOverview {
   venueProviderConfigured: boolean;
 }
 
+export interface VenueBoundingBox {
+  /**
+     * @minimum -90
+     * @maximum 90
+     */
+  south: number;
+  /**
+     * @minimum -180
+     * @maximum 180
+     */
+  west: number;
+  /**
+     * @minimum -90
+     * @maximum 90
+     */
+  north: number;
+  /**
+     * @minimum -180
+     * @maximum 180
+     */
+  east: number;
+}
+
+export type VenueProvider = typeof VenueProvider[keyof typeof VenueProvider];
+
+
+export const VenueProvider = {
+  openstreetmap: 'openstreetmap',
+  overture: 'overture',
+} as const;
+
+export interface Venue {
+  provider: VenueProvider;
+  /** @minLength 1 */
+  providerVenueId: string;
+  /** @minLength 1 */
+  name: string;
+  /**
+     * @minimum -90
+     * @maximum 90
+     */
+  latitude: number;
+  /**
+     * @minimum -180
+     * @maximum 180
+     */
+  longitude: number;
+  address?: string;
+  categories: string[];
+  website?: string;
+  phone?: string;
+  email?: string;
+  rating?: number;
+  ratingCount?: number;
+  openingHours?: string;
+  attribution: string;
+  retrievedAt: string;
+}
+
+export type VenueProviderStatusState = typeof VenueProviderStatusState[keyof typeof VenueProviderStatusState];
+
+
+export const VenueProviderStatusState = {
+  reachable: 'reachable',
+  unavailable: 'unavailable',
+  unknown: 'unknown',
+} as const;
+
+export interface VenueProviderStatus {
+  configured: boolean;
+  state: VenueProviderStatusState;
+  message: string;
+}
+
+export type VenueSearchInputRadius = {
+  /**
+     * @minimum -90
+     * @maximum 90
+     */
+  latitude: number;
+  /**
+     * @minimum -180
+     * @maximum 180
+     */
+  longitude: number;
+  /**
+     * @minimum 0.1
+     * @maximum 25
+     */
+  kilometers: number;
+};
+
+export type VenueSearchInputCategoriesItem = typeof VenueSearchInputCategoriesItem[keyof typeof VenueSearchInputCategoriesItem];
+
+
+export const VenueSearchInputCategoriesItem = {
+  restaurant: 'restaurant',
+  cafe: 'cafe',
+  shopping: 'shopping',
+  entertainment: 'entertainment',
+  sports: 'sports',
+  culture: 'culture',
+  museum: 'museum',
+  event_space: 'event_space',
+} as const;
+
+export interface VenueSearchInput {
+  bbox?: VenueBoundingBox;
+  radius?: VenueSearchInputRadius;
+  categories: VenueSearchInputCategoriesItem[];
+  /** @maxLength 120 */
+  query?: string;
+  /**
+     * @minimum 1
+     * @maximum 50
+     */
+  limit?: number;
+}
+
+export type VenueSearchResponseSource = typeof VenueSearchResponseSource[keyof typeof VenueSearchResponseSource];
+
+
+export const VenueSearchResponseSource = {
+  openstreetmap: 'openstreetmap',
+  overture: 'overture',
+  overture: 'overture',
+} as const;
+
+export interface VenueSearchResponse {
+  source: VenueSearchResponseSource;
+  venues: Venue[];
+  attribution: string;
+}
+
+export type VenueSuitabilityEvidenceKind = typeof VenueSuitabilityEvidenceKind[keyof typeof VenueSuitabilityEvidenceKind];
+
+
+export const VenueSuitabilityEvidenceKind = {
+  venue_fact: 'venue_fact',
+  category_match: 'category_match',
+  geographic_context: 'geographic_context',
+  bridge_evidence: 'bridge_evidence',
+  qloo_evidence: 'qloo_evidence',
+  missing_data: 'missing_data',
+} as const;
+
+export interface VenueSuitabilityEvidence {
+  kind: VenueSuitabilityEvidenceKind;
+  label: string;
+  value: string;
+}
+
+export interface VenueSuitabilityInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  interestA: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  interestB: string;
+  /** @maxLength 160 */
+  bridgeName?: string;
+  /**
+     * @maxItems 20
+     * @items.maxLength 80
+     */
+  categories?: string[];
+  qlooEvidence?: EvidenceItem[];
+}
+
+export interface VenueSuitabilityResponse {
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  score: number;
+  scoreLabel: string;
+  explanation: string;
+  evidence: VenueSuitabilityEvidence[];
+  missingData: string[];
+}

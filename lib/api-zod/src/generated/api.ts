@@ -535,3 +535,138 @@ export const GetOpportunityHeatmapResponse = zod.object({
 })
 
 
+export const GetVenueProviderStatusResponse = zod.object({
+  "configured": zod.boolean(),
+  "state": zod.enum(['reachable', 'unavailable', 'unknown']),
+  "message": zod.string()
+})
+
+
+export const searchVenuesBodyBboxSouthMin = -90;
+export const searchVenuesBodyBboxSouthMax = 90;
+
+export const searchVenuesBodyBboxWestMin = -180;
+export const searchVenuesBodyBboxWestMax = 180;
+
+export const searchVenuesBodyBboxNorthMin = -90;
+export const searchVenuesBodyBboxNorthMax = 90;
+
+export const searchVenuesBodyBboxEastMin = -180;
+export const searchVenuesBodyBboxEastMax = 180;
+
+export const searchVenuesBodyRadiusLatitudeMin = -90;
+export const searchVenuesBodyRadiusLatitudeMax = 90;
+
+export const searchVenuesBodyRadiusLongitudeMin = -180;
+export const searchVenuesBodyRadiusLongitudeMax = 180;
+
+export const searchVenuesBodyRadiusKilometersMin = 0.1;
+export const searchVenuesBodyRadiusKilometersMax = 25;
+
+export const searchVenuesBodyQueryMax = 120;
+
+export const searchVenuesBodyLimitDefault = 25;
+export const searchVenuesBodyLimitMax = 50;
+
+
+
+export const SearchVenuesBody = zod.object({
+  "bbox": zod.object({
+  "south": zod.number().min(searchVenuesBodyBboxSouthMin).max(searchVenuesBodyBboxSouthMax),
+  "west": zod.number().min(searchVenuesBodyBboxWestMin).max(searchVenuesBodyBboxWestMax),
+  "north": zod.number().min(searchVenuesBodyBboxNorthMin).max(searchVenuesBodyBboxNorthMax),
+  "east": zod.number().min(searchVenuesBodyBboxEastMin).max(searchVenuesBodyBboxEastMax)
+}).optional(),
+  "radius": zod.object({
+  "latitude": zod.number().min(searchVenuesBodyRadiusLatitudeMin).max(searchVenuesBodyRadiusLatitudeMax),
+  "longitude": zod.number().min(searchVenuesBodyRadiusLongitudeMin).max(searchVenuesBodyRadiusLongitudeMax),
+  "kilometers": zod.number().min(searchVenuesBodyRadiusKilometersMin).max(searchVenuesBodyRadiusKilometersMax)
+}).optional(),
+  "categories": zod.array(zod.enum(['restaurant', 'cafe', 'shopping', 'entertainment', 'sports', 'culture', 'museum', 'event_space'])),
+  "query": zod.string().max(searchVenuesBodyQueryMax).optional(),
+  "limit": zod.number().int().min(1).max(searchVenuesBodyLimitMax).default(searchVenuesBodyLimitDefault)
+})
+
+
+
+export const searchVenuesResponseVenuesItemLatitudeMin = -90;
+export const searchVenuesResponseVenuesItemLatitudeMax = 90;
+
+export const searchVenuesResponseVenuesItemLongitudeMin = -180;
+export const searchVenuesResponseVenuesItemLongitudeMax = 180;
+
+
+
+export const SearchVenuesResponse = zod.object({
+  "source": zod.enum(['openstreetmap', 'overture']),
+  "venues": zod.array(zod.object({
+  "provider": zod.enum(['openstreetmap', 'overture']),
+  "providerVenueId": zod.string().min(1),
+  "name": zod.string().min(1),
+  "latitude": zod.number().min(searchVenuesResponseVenuesItemLatitudeMin).max(searchVenuesResponseVenuesItemLatitudeMax),
+  "longitude": zod.number().min(searchVenuesResponseVenuesItemLongitudeMin).max(searchVenuesResponseVenuesItemLongitudeMax),
+  "address": zod.string().optional(),
+  "categories": zod.array(zod.string()),
+  "website": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "rating": zod.number().optional(),
+  "ratingCount": zod.number().int().optional(),
+  "openingHours": zod.string().optional(),
+  "attribution": zod.string(),
+  "retrievedAt": zod.coerce.date()
+})),
+  "attribution": zod.string()
+})
+
+
+export const assessVenueSuitabilityPathProviderVenueIdMax = 160;
+
+
+
+export const AssessVenueSuitabilityParams = zod.object({
+  "providerVenueId": zod.coerce.string().max(assessVenueSuitabilityPathProviderVenueIdMax)
+})
+
+export const assessVenueSuitabilityBodyInterestAMax = 120;
+
+export const assessVenueSuitabilityBodyInterestBMax = 120;
+
+export const assessVenueSuitabilityBodyBridgeNameMax = 160;
+
+export const assessVenueSuitabilityBodyCategoriesItemMax = 80;
+
+export const assessVenueSuitabilityBodyCategoriesMax = 20;
+
+
+
+export const AssessVenueSuitabilityBody = zod.object({
+  "interestA": zod.string().min(1).max(assessVenueSuitabilityBodyInterestAMax),
+  "interestB": zod.string().min(1).max(assessVenueSuitabilityBodyInterestBMax),
+  "bridgeName": zod.string().max(assessVenueSuitabilityBodyBridgeNameMax).optional(),
+  "categories": zod.array(zod.string().max(assessVenueSuitabilityBodyCategoriesItemMax)).max(assessVenueSuitabilityBodyCategoriesMax).optional(),
+  "qlooEvidence": zod.array(zod.object({
+  "source": zod.string(),
+  "label": zod.string(),
+  "value": zod.string(),
+  "kind": zod.enum(['observed_api', 'external_data', 'derived', 'hypothesis'])
+})).optional()
+})
+
+export const assessVenueSuitabilityResponseScoreMin = 0;
+export const assessVenueSuitabilityResponseScoreMax = 100;
+
+
+
+export const AssessVenueSuitabilityResponse = zod.object({
+  "score": zod.number().int().min(assessVenueSuitabilityResponseScoreMin).max(assessVenueSuitabilityResponseScoreMax),
+  "scoreLabel": zod.string(),
+  "explanation": zod.string(),
+  "evidence": zod.array(zod.object({
+  "kind": zod.enum(['venue_fact', 'category_match', 'geographic_context', 'bridge_evidence', 'qloo_evidence', 'missing_data']),
+  "label": zod.string(),
+  "value": zod.string()
+})),
+  "missingData": zod.array(zod.string())
+})
+

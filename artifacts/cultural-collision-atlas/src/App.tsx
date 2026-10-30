@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
@@ -11,12 +11,14 @@ import {
   getListActivationPlansQueryKey, getListSavedDiscoveriesQueryKey,
   useDeleteActivationPlan, useDeleteSavedDiscovery, useDiscoverCulturalBridges,
   useGenerateActivationPlanWithAgent,
+  useAssessVenueSuitability,
+  useGetVenueProviderStatus,
   useGetAtlasOverview, useGetOpportunityHeatmap, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
-  useSearchQlooEntities, useTestQlooConnection,
+  useSearchQlooEntities, useSearchVenues, useTestQlooConnection,
 } from '@workspace/api-client-react';
 import type {
-  ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus,
+  ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus, Venue, VenueSearchInputCategoriesItem,
   SavedDiscovery,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
@@ -34,12 +36,15 @@ import { describeHeatmapPoint } from '@/lib/heatmap-display';
 import { getSavedPlanDetails } from '@/lib/saved-plan-details';
 import {
   buildActivationPlanContent,
+  buildActivationPlanExportPayload,
   buildActivationPlanSaveInput,
   buildDiscoverySaveInput,
   getSavedDiscoveryDetails,
   type ActivationPlanDraft,
 } from '@/lib/product-workflow';
 import NotFound from '@/pages/not-found';
+import { VenueMap, type VenueMapBounds } from '@/components/venue-map';
+import { clearSelectedVenueSession, clearVenueDraftSession } from '@/lib/venue-session';
 
 const queryClient = new QueryClient();
 
@@ -531,6 +536,76 @@ function AtlasPage() {
   const heatmap = useGetOpportunityHeatmap();
   const status = useGetQlooStatus();
   const catalogSearch = useSearchQlooEntities();
+  const venueProvider = useGetVenueProviderStatus();
+  const venueSearch = useSearchVenues();
+  const venueSuitability = useAssessVenueSuitability();
+  const [venueQuery, setVenueQuery] = useState('');
+  const [venueCategory, setVenueCategory] = useState<VenueSearchInputCategoriesItem | ''>('restaurant');
+  const [venueRadiusMode, setVenueRadiusMode] = useState(false);
+  const [venueRadiusKm, setVenueRadiusKm] = useState(5);
+  const [venueBounds, setVenueBounds] = useState<VenueMapBounds>({
+    south: -0.02, west: -0.02, north: 0.02, east: 0.02,
+  });
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
+  const [shortlist, setShortlist] = useState<string[]>([]);
+  const [fitRequest, setFitRequest] = useState(0);
+  const handleMapBounds = useCallback((bounds: VenueMapBounds) => setVenueBounds(bounds), []);
+  const handleVenueSelect = useCallback((venue: Venue) => {
+    setSelectedVenue(venue);
+    sessionStorage.removeItem('atlas:selected-venue-suitability');
+    let interests: { interestA?: string; interestB?: string; candidate?: BridgeCandidate } = {};
+    try {
+      const rawDraft = sessionStorage.getItem('atlas:draft-plan');
+      if (rawDraft) {
+        const draft = JSON.parse(rawDraft) as {
+          form?: { interestA?: string; interestB?: string };
+          candidate?: BridgeCandidate;
+        };
+        interests = {
+          interestA: draft.form?.interestA,
+          interestB: draft.form?.interestB,
+          candidate: draft.candidate,
+        };
+      }
+    } catch {
+      interests = {};
+    }
+    venueSuitability.mutate({
+      providerVenueId: venue.providerVenueId,
+      data: {
+        interestA: interests.interestA || 'local culture',
+        interestB: interests.interestB || 'community experiences',
+        bridgeName: interests.candidate?.name || entityQuery || undefined,
+        categories: venue.categories,
+        qlooEvidence: interests.candidate?.evidence ?? [],
+      },
+    }, {
+      onSuccess: (assessment) => sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(assessment)),
+    });
+  }, [entityQuery, venueSuitability]);
+  const searchVenues = () => {
+    venueSearch.mutate({
+      data: {
+        ...(venueRadiusMode ? {
+          radius: {
+            latitude: (venueBounds.south + venueBounds.north) / 2,
+            longitude: (venueBounds.west + venueBounds.east) / 2,
+            kilometers: Math.min(25, Math.max(0.1, venueRadiusKm)),
+          },
+        } : { bbox: venueBounds }),
+        categories: venueCategory ? [venueCategory] : [],
+        ...(venueQuery.trim() && { query: venueQuery.trim() }),
+        limit: 25,
+      },
+    }, {
+      onSuccess: (result) => {
+        setVenues(result.venues);
+        setSelectedVenue(null);
+        setFitRequest((value) => value + 1);
+      },
+    });
+  };
   const searchCatalog = () => {
     if (!entityQuery.trim()) return;
     setEntityId('');
@@ -551,7 +626,7 @@ function AtlasPage() {
   }, [points]);
   return <div className="page-in">
     <PageTitle kicker="02 / geographic context" title="Opportunity Atlas" detail="Explore geography only when a connected source returns spatial evidence. No venue pins, addresses, or neighborhood claims are fabricated." right={<StatusPill status={status.data} />} />
-    {!overview.isLoading && !overview.data?.venueProviderConfigured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-100/[.035] p-4"><MapPin size={16} className="mt-0.5 shrink-0 text-[#dbb969]" /><div><div className="text-[12px] font-semibold text-[#ded1ac]">Venue layer unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#928a77]">No venue provider is configured for this workspace. Place search, venue details, and suitability claims are hidden until a source is connected.</p></div></div>}
+    {venueProvider.isError && <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-100/[.035] p-4"><MapPin size={16} className="mt-0.5 shrink-0 text-[#dbb969]" /><div><div className="text-[12px] font-semibold text-[#ded1ac]">Venue provider status unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#928a77]">Venue discovery could not be reached. The existing heatmap remains available.</p></div></div>}
     {!status.isLoading && !status.data?.configured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-white/[.09] bg-white/[.02] p-4"><Globe2 size={16} className="mt-0.5 shrink-0 text-[#858fa4]" /><div><div className="text-[12px] font-semibold text-[#bdc4d2]">Heatmap source unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">Qloo is not configured for this workspace. Geographic signal requests are disabled until an administrator configures the source.</p></div></div>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <Panel className="min-h-[490px]">
@@ -582,15 +657,78 @@ function AtlasPage() {
             <Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending || !status.data?.configured} type="submit"><Radar size={14} />Request spatial signal</Button>
           </form>
           <div className="mt-5 border-t border-white/[.07] pt-4">
-            <div className="eyebrow text-[9px] text-[#78849a]">Venue planning filters</div>
-            <p className="mt-1 text-[9px] leading-4 text-[#79859a]">These filters apply to sourced venue records, not Qloo’s affinity heatmap. They stay unavailable until a venue provider is configured.</p>
+            <div className="eyebrow text-[9px] text-[#78849a]">OpenStreetMap venues</div>
+            <p className="mt-1 text-[9px] leading-4 text-[#79859a]">Move or zoom the venue map, then search the visible area. No paid provider or API key is required.</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <Field label="Activation type"><select className="field opacity-45" disabled aria-label="Activation type venue filter"><option>Any type</option></select></Field>
-              <Field label="Budget range"><select className="field opacity-45" disabled aria-label="Budget venue filter"><option>Any range</option></select></Field>
+              <Field label="Venue name"><input value={venueQuery} onChange={(event) => setVenueQuery(event.target.value)} className="field" placeholder="Optional name" /></Field>
+              <Field label="Venue category"><select value={venueCategory} onChange={(event) => setVenueCategory(event.target.value as VenueSearchInputCategoriesItem | '')} className="field" aria-label="Venue category"><option value="">All venues</option><option value="restaurant">Restaurants</option><option value="cafe">Cafes</option><option value="shopping">Shopping</option><option value="entertainment">Entertainment</option><option value="sports">Sports</option><option value="culture">Culture</option><option value="museum">Museums</option><option value="event_space">Event spaces</option></select></Field>
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-[9px] text-[#99a3b6]"><input type="checkbox" checked={venueRadiusMode} onChange={(event) => setVenueRadiusMode(event.target.checked)} />Search by radius</label>
+              {venueRadiusMode && <Field label="Radius km"><input className="field w-24" type="number" min="0.1" max="25" step="0.1" value={venueRadiusKm} onChange={(event) => setVenueRadiusKm(Number(event.target.value))} /></Field>}
+            </div>
+            <Button variant="outline" className="mt-3 w-full" onClick={searchVenues} disabled={venueSearch.isPending}><Search size={14} />{venueSearch.isPending ? 'Searching map area…' : 'Search visible map area'}</Button>
           </div>
         </Panel>
         <Panel><div className="eyebrow text-[9px] text-[#78849a]">How to read this</div><div className="mt-3 space-y-3"><EvidenceLegend color="bg-[#67d9e2]" title="Returned coordinates" description="Only plotted when supplied by the API." /><EvidenceLegend color="bg-[#e5b96d]" title="Venue layer" description={overview.data?.venueProviderConfigured ? 'Provider configured; venue coverage is still source-dependent.' : 'Not configured for this workspace.'} /></div><div className="mt-4 border-t border-white/[.07] pt-3 text-[9px] leading-5 text-[#747f94]">A point field is not a venue recommendation or proof of event suitability.</div></Panel>
+      </div>
+    </div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_390px]">
+      <Panel>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div><div className="eyebrow text-[9px] text-[#78849a]">Free venue discovery</div><h2 className="mt-1 text-[16px] font-semibold">OpenStreetMap venue intelligence</h2></div>
+          <span className="text-[9px] text-[#7d899e]">© OpenStreetMap contributors</span>
+        </div>
+        {venueSearch.isError ? <ErrorNotice title="Venue discovery unavailable" onRetry={searchVenues} /> : <VenueMap venues={venues} selectedVenueId={selectedVenue?.providerVenueId} onSelect={handleVenueSelect} onBoundsChange={handleMapBounds} fitRequest={fitRequest} />}
+        {venues.length === 0 && !venueSearch.isPending && <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Pan and zoom the map, choose a category, then search. No sample or invented venues are displayed.</p>}
+      </Panel>
+      <div className="space-y-5">
+        <Panel>
+          <div className="eyebrow text-[9px] text-[#78849a]">Venue results</div>
+          <h2 className="mt-1 text-[15px] font-semibold">{venues.length} mapped locations</h2>
+          {shortlist.length > 0 && (
+            <div className="mt-2 text-[9px] leading-4 text-[#a8b0c0]">
+              Shortlisted: {venues.filter((venue) => shortlist.includes(venue.providerVenueId)).map((venue) => venue.name).join(' · ') || `${shortlist.length} venue${shortlist.length === 1 ? '' : 's'}`}
+            </div>
+          )}
+          {venueSearch.isPending ? <div className="mt-4 grid place-items-center py-12 text-[10px] text-[#8e99ad]"><LoaderCircle className="mb-2 animate-spin" size={18} />Searching Overpass…</div> : venues.length === 0 ? <p className="mt-4 text-[10px] leading-5 text-[#818ca1]">No provider results loaded for this map area.</p> : (
+            <div className="mt-4 max-h-[270px] space-y-2 overflow-auto pr-1">
+              {venues.map((venue) => (
+                <div key={venue.providerVenueId} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') handleVenueSelect(venue); }} onClick={() => handleVenueSelect(venue)} className={cx('w-full cursor-pointer rounded-xl border px-3 py-3 text-left', selectedVenue?.providerVenueId === venue.providerVenueId ? 'border-cyan-200/30 bg-cyan-100/[.05]' : 'border-white/[.07] bg-white/[.018] hover:bg-white/[.04]')}>
+                  <div className="flex items-start justify-between gap-2"><span className="text-[11px] font-semibold text-[#d8dde8]">{venue.name}</span><button type="button" aria-label={`${shortlist.includes(venue.providerVenueId) ? 'Remove' : 'Add'} ${venue.name} ${shortlist.includes(venue.providerVenueId) ? 'from' : 'to'} shortlist`} onClick={(event) => { event.stopPropagation(); setShortlist((current) => current.includes(venue.providerVenueId) ? current.filter((id) => id !== venue.providerVenueId) : [...current, venue.providerVenueId]); }} className={cx('text-[#9b8be4]', shortlist.includes(venue.providerVenueId) && 'text-amber-200')}><Bookmark size={13} fill={shortlist.includes(venue.providerVenueId) ? 'currentColor' : 'none'} /></button></div>
+                  <div className="mt-1 text-[9px] text-[#8995aa]">{venue.categories.join(', ')}{venue.address ? ` · ${venue.address}` : ''}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        <Panel>
+          <div className="eyebrow text-[9px] text-[#78849a]">Selected venue</div>
+          {!selectedVenue ? <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Select a marker or result to inspect provider facts and cultural suitability.</p> : (
+            <div className="mt-3">
+              <h3 className="text-[14px] font-semibold">{selectedVenue.name}</h3>
+              <p className="mt-1 text-[9px] text-[#8793a8]">{selectedVenue.address || `${selectedVenue.latitude.toFixed(5)}, ${selectedVenue.longitude.toFixed(5)}`}</p>
+              <div className="mt-3 flex flex-wrap gap-2">{selectedVenue.categories.map((category) => <span key={category} className="rounded-full border border-white/[.09] px-2 py-1 text-[8px] text-[#aeb6c7]">{category}</span>)}</div>
+              {selectedVenue.website && <a href={selectedVenue.website} target="_blank" rel="noreferrer" className="mt-3 block break-all text-[10px] text-[#86dbe3]">Provider website <ExternalLink size={10} className="inline" /></a>}
+              {venueSuitability.isPending ? <p className="mt-4 text-[10px] text-[#8c97ac]">Evaluating evidence…</p> : venueSuitability.data && (
+                <div className="mt-4 rounded-xl border border-violet-200/10 bg-violet-100/[.025] p-3">
+                  <div className="text-[19px] font-semibold text-[#b8a7f4]">{venueSuitability.data.score}<span className="text-[9px] text-[#858fa3]"> / 100 operational data-fit</span></div>
+                  <div className="mt-1 text-[9px] leading-4 text-[#858fa3]">{venueSuitability.data.scoreLabel}</div>
+                  <p className="mt-3 text-[10px] leading-5 text-[#aeb7c8]">{venueSuitability.data.explanation}</p>
+                  <div className="mt-3 space-y-2">{venueSuitability.data.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="border-t border-white/[.06] pt-2"><div className="text-[9px] font-semibold text-[#cbd1df]">{item.label}</div><p className="mt-1 text-[9px] leading-4 text-[#8995aa]">{item.value}</p></div>)}</div>
+                </div>
+              )}
+              <Button variant="primary" className="mt-4 w-full" onClick={() => {
+                sessionStorage.setItem('atlas:selected-venue', JSON.stringify(selectedVenue));
+                if (venueSuitability.data) {
+                  sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(venueSuitability.data));
+                }
+                window.location.assign('/plans');
+              }}><FileText size={14} />Use in activation planner</Button>
+              <p className="mt-2 text-[8px] leading-4 text-[#747f94]">The planner preserves its existing deterministic fallback. OpenStreetMap facts are not treated as ratings or audience proof.</p>
+            </div>
+          )}
+        </Panel>
       </div>
     </div>
   </div>;
@@ -603,8 +741,25 @@ function PlansPage() {
   const generateAgentPlan = useGenerateActivationPlanWithAgent();
   const deletePlan = useDeleteActivationPlan();
   const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
+  const [venueContext] = useState<ActivationPlanDraft['venue'] | null>(() => {
+    try {
+      const raw = sessionStorage.getItem('atlas:selected-venue');
+      return raw ? JSON.parse(raw) as ActivationPlanDraft['venue'] : null;
+    } catch { return null; }
+  });
   const [draft, setDraft] = useState<ActivationPlanDraft | null>(() => {
-    try { const raw = sessionStorage.getItem('atlas:draft-plan'); return raw ? JSON.parse(raw) : null; } catch { return null; }
+    try {
+      const raw = sessionStorage.getItem('atlas:draft-plan');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as ActivationPlanDraft;
+      const venueRaw = sessionStorage.getItem('atlas:selected-venue');
+      const suitabilityRaw = sessionStorage.getItem('atlas:selected-venue-suitability');
+      return venueRaw ? {
+        ...parsed,
+        venue: JSON.parse(venueRaw) as ActivationPlanDraft['venue'],
+        ...(suitabilityRaw ? { venueSuitability: JSON.parse(suitabilityRaw) as ActivationPlanDraft['venueSuitability'] } : {}),
+      } : parsed;
+    } catch { return null; }
   });
   const [title, setTitle] = useState('');
   const [exported, setExported] = useState(false);
@@ -623,7 +778,7 @@ function PlansPage() {
     if (!draft || !planContent || !title.trim()) return;
     setSaveError(false);
     savePlan.mutate({ data: buildActivationPlanSaveInput(title, draft, planContent, agentPlan ?? undefined) }, {
-      onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); setTitle(''); },
+      onSuccess: () => { qc.invalidateQueries({ queryKey: getListActivationPlansQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); setDraft(null); setAgentPlan(null); setAgentFallback(false); clearVenueDraftSession(sessionStorage); clearSelectedVenueSession(sessionStorage); setTitle(''); },
       onError: () => setSaveError(true),
     });
   };
@@ -660,7 +815,7 @@ function PlansPage() {
     });
   };
   const exportPlan = (plan: ActivationPlan | null) => {
-    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: buildActivationPlanSaveInput(title || `${draft.form.city} cultural bridge`, draft, planContent, agentPlan ?? undefined).plan } : null;
+    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? buildActivationPlanExportPayload(title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, draft, planContent, agentPlan ?? undefined) : null;
     if (!payload) return;
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -670,6 +825,13 @@ function PlansPage() {
   };
   return <div className="page-in">
     <PageTitle kicker="03 / activation planning" title="Activation Planner" detail="Translate an evidence-backed bridge into a reviewable brief. Strategic ideas are clearly identified as hypotheses; budgets remain planning inputs." />
+    {!draft && venueContext && <Panel className="mb-5">
+      <div className="eyebrow text-[9px] text-[#78849a]">Selected venue context</div>
+      <h2 className="mt-1 text-[15px] font-semibold">{venueContext.name}</h2>
+      <p className="mt-1 text-[10px] leading-5 text-[#8994a9]">{venueContext.address || `${venueContext.latitude.toFixed(5)}, ${venueContext.longitude.toFixed(5)}`} · {venueContext.categories.join(', ') || 'category not provided'}</p>
+      <p className="mt-3 text-[9px] leading-5 text-[#8994a9]">Create a discovery brief in Discovery Studio to generate and save a venue-aware activation plan. Venue facts will remain attached to the brief.</p>
+      <Button variant="outline" type="button" className="mt-4" onClick={() => window.location.assign('/discovery')}><Sparkles size={14} />Create discovery brief</Button>
+    </Panel>}
     {draft && planContent && <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <Panel><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#8d7ec3]">Current working brief</div><h2 className="mt-1 text-[18px] font-semibold">{draft.candidate.name}</h2><p className="mt-1 text-[11px] text-[#8d98ad]">{draft.form.interestA} × {draft.form.interestB} · {draft.form.city}</p></div><span className={cx('rounded-full border px-2.5 py-1 text-[9px]', strategySource === 'ai_generated' ? 'border-cyan-100/20 bg-cyan-100/[.04] text-cyan-100' : 'border-amber-100/20 bg-amber-100/[.04] text-amber-100')}>{strategySource === 'ai_generated' ? 'AI-generated strategy' : 'Deterministic fallback · not AI-generated'}</span></div>
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/[.07] bg-white/[.02] p-3">
@@ -684,7 +846,7 @@ function PlansPage() {
         {agentPlan ? <ActivationStrategyView result={agentPlan} /> : <DeterministicPlanView planContent={planContent} requestFailed={agentFallback} />}
         <p className="mt-4 text-[9px] leading-5 text-[#8994a9]">{agentPlan?.caveat ?? 'Deterministic fallback; no AI-generated strategy is available. The selected bridge and evidence above come from the saved discovery, not this planner request.'}</p>
       </Panel>
-      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending || generateAgentPlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
+      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending || generateAgentPlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); setAgentPlan(null); setAgentFallback(false); clearVenueDraftSession(sessionStorage); clearSelectedVenueSession(sessionStorage); }}>Discard working brief</Button></form></Panel>
     </div>}
     <Panel><div className="mb-4 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#78849a]">Workspace library</div><h2 className="mt-1 text-[16px] font-semibold">Saved activation plans</h2></div><span className="mono rounded-md border border-white/[.08] px-2 py-1 text-[9px] text-[#7c879c]">{plansQuery.data?.length ?? '—'} plans</span></div>
       {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}
@@ -772,6 +934,21 @@ function PlanRow({ plan, expanded, onToggle, onExport, onDelete, deleting }: { p
     {expanded && <div className="mt-4 space-y-4 border-t border-white/[.07] pt-4">
       <div className="rounded-lg border border-white/[.07] bg-white/[.018] p-3 text-[10px] leading-5 text-[#aeb8ca]"><div><strong className="text-[#d3d9e5]">Bridge:</strong> {plan.bridgeName || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">Inputs:</strong> {plan.interestA || 'Not recorded'} × {plan.interestB || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">City/locality:</strong> {plan.city || 'Not recorded'}</div>{plan.objective && <div><strong className="text-[#d3d9e5]">Objective:</strong> {plan.objective}</div>}</div>
       <div className="rounded-lg border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]">This is the stored plan snapshot. It does not refresh automatically or remain linked to a discovery record.</div>
+      {details.selectedVenue && <section className="rounded-lg border border-cyan-100/[.1] bg-cyan-100/[.02] p-3" data-testid={`venue-plan-${plan.id}`}>
+        <div className="eyebrow text-[9px] text-[#78849a]">Selected venue · saved provider facts</div>
+        <div className="mt-2 text-[12px] font-semibold text-[#d7dce6]">{details.selectedVenue.name}</div>
+        <div className="mt-1 text-[10px] leading-5 text-[#929db1]">{details.selectedVenue.address || `${details.selectedVenue.latitude.toFixed(5)}, ${details.selectedVenue.longitude.toFixed(5)}`}</div>
+        <div className="mt-1 text-[9px] text-[#929db1]">Categories: {details.selectedVenue.categories.join(', ') || 'Not provided'}</div>
+        <div className="mt-1 mono text-[8px] text-[#737f94]">Coordinates · {details.selectedVenue.latitude.toFixed(5)}, {details.selectedVenue.longitude.toFixed(5)} · Provider ID · {details.selectedVenue.providerVenueId}</div>
+        <div className="mt-1 text-[9px] text-[#737f94]">Source attribution · {details.selectedVenue.attribution}</div>
+        {details.selectedVenue.suitability ? <div className="mt-3 border-t border-white/[.07] pt-3">
+          <div className="text-[10px] font-semibold text-[#cbd1df]">Saved operational assessment · {details.selectedVenue.suitability.score} / 100</div>
+          <div className="mt-1 text-[9px] leading-4 text-[#929db1]">{details.selectedVenue.suitability.scoreLabel}</div>
+          <p className="mt-2 text-[9px] leading-4 text-[#929db1]">{details.selectedVenue.suitability.explanation}</p>
+          {details.selectedVenue.suitability.evidence.length > 0 && <div className="mt-2 space-y-1">{details.selectedVenue.suitability.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="text-[9px] text-[#929db1]"><span className="font-semibold text-[#cbd1df]">{item.label}:</span> {item.value}</div>)}</div>}
+          {details.selectedVenue.suitability.missingData.length > 0 && <div className="mt-2 text-[9px] text-[#bbaa83]">Missing data: {details.selectedVenue.suitability.missingData.join('; ')}</div>}
+        </div> : <p className="mt-3 text-[9px] text-[#929db1]">No saved suitability assessment is available.</p>}
+      </section>}
       <section><div className="eyebrow text-[9px] text-[#78849a]">Stored source evidence</div>{details.source && <div className="mt-1 text-[9px] text-[#909bb0]">Response source: {details.source}</div>}{details.evidence.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.evidence.map((item, index) => <div key={`${item.source}-${index}`} className="rounded-lg border border-cyan-100/[.08] bg-cyan-100/[.02] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#c5ccda]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#929db2]">{item.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">Source · {item.source}</div></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored evidence details are available on this plan.</p>}{details.caveat && <p className="mt-2 text-[10px] leading-5 text-[#aab4c6]">Stored caveat: {details.caveat}</p>}</section>
       <section><div className="eyebrow text-[9px] text-[#bca26d]">{details.strategySource === 'ai_generated' ? 'AI-generated strategy · Qloo citations preserved' : details.strategySource === 'deterministic_fallback' ? 'Deterministic fallback · not AI-generated' : 'Stored planning content · historical record'}</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.userProvidedAssumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">User-provided assumptions · not independently verified</div><ul className="mt-1 list-disc pl-4">{details.userProvidedAssumptions.map((assumption, index) => <li key={`user-${index}-${assumption}`}>{assumption}</li>)}</ul></div>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored planning assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
       <section className="rounded-lg border border-white/[.07] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Budget constraint</div>{details.budgetRange || details.budgetStatus ? <><div className="mt-1 text-[10px] text-[#c5ccda]">{details.budgetRange ?? 'Range not recorded'}</div>{details.budgetStatus && <div className="mt-1 text-[9px] text-[#8792a6]">{details.budgetStatus}</div>}</> : <p className="mt-1 text-[10px] text-[#8792a6]">No budget constraint was stored.</p>}</section>
