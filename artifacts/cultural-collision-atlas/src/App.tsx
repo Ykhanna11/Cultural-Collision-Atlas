@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useMemo, useReducer, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
@@ -612,10 +612,12 @@ function PlansPage() {
   const [agentPlan, setAgentPlan] = useState<ActivationPlannerResponse | null>(null);
   const [agentFallback, setAgentFallback] = useState(false);
   const [expandedPlanId, setExpandedPlanId] = useState<number | null>(null);
+  const requestedDraft = useRef<ActivationPlanDraft | null>(null);
   const planContent = useMemo(
     () => (draft ? buildActivationPlanContent(draft) : null),
     [draft],
   );
+  const strategySource = agentPlan?.source ?? 'deterministic_fallback';
   const saveCurrent = (event: FormEvent) => {
     event.preventDefault();
     if (!draft || !planContent || !title.trim()) return;
@@ -640,6 +642,11 @@ function PlansPage() {
       onError: () => setAgentFallback(true),
     });
   };
+  useEffect(() => {
+    if (!draft || requestedDraft.current === draft) return;
+    requestedDraft.current = draft;
+    requestAgentPlan();
+  }, [draft]);
   const removePlan = (plan: ActivationPlan) => {
     if (!window.confirm(`Delete “${plan.title}” from saved plans?`)) return;
     dispatchDeleteFeedback({ type: 'clear' });
@@ -653,7 +660,7 @@ function PlansPage() {
     });
   };
   const exportPlan = (plan: ActivationPlan | null) => {
-    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: agentPlan ? { ...planContent, agent: agentPlan } : planContent } : null;
+    const payload = plan ? { title: plan.title, city: plan.city, interests: [plan.interestA, plan.interestB], bridge: plan.bridgeName, objective: plan.objective, plan: plan.plan, createdAt: plan.createdAt } : draft && planContent ? { title: title || `${draft.form.interestA} × ${draft.form.interestB} activation brief`, city: draft.form.city, interests: [draft.form.interestA, draft.form.interestB], bridge: draft.candidate.name, objective: draft.form.objective, plan: buildActivationPlanSaveInput(title || `${draft.form.city} cultural bridge`, draft, planContent, agentPlan ?? undefined).plan } : null;
     if (!payload) return;
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -664,31 +671,20 @@ function PlansPage() {
   return <div className="page-in">
     <PageTitle kicker="03 / activation planning" title="Activation Planner" detail="Translate an evidence-backed bridge into a reviewable brief. Strategic ideas are clearly identified as hypotheses; budgets remain planning inputs." />
     {draft && planContent && <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
-      <Panel><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#8d7ec3]">Current working brief · hypothesis-led</div><h2 className="mt-1 text-[18px] font-semibold">{draft.candidate.name}</h2><p className="mt-1 text-[11px] text-[#8d98ad]">{draft.form.interestA} × {draft.form.interestB} · {draft.form.city}</p></div><EvidenceKind kind="hypothesis" /></div>
+      <Panel><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#8d7ec3]">Current working brief</div><h2 className="mt-1 text-[18px] font-semibold">{draft.candidate.name}</h2><p className="mt-1 text-[11px] text-[#8d98ad]">{draft.form.interestA} × {draft.form.interestB} · {draft.form.city}</p></div><span className={cx('rounded-full border px-2.5 py-1 text-[9px]', strategySource === 'ai_generated' ? 'border-cyan-100/20 bg-cyan-100/[.04] text-cyan-100' : 'border-amber-100/20 bg-amber-100/[.04] text-amber-100')}>{strategySource === 'ai_generated' ? 'AI-generated strategy' : 'Deterministic fallback · not AI-generated'}</span></div>
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/[.07] bg-white/[.02] p-3">
           <Button variant="outline" type="button" onClick={requestAgentPlan} disabled={generateAgentPlan.isPending}>
             {generateAgentPlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {generateAgentPlan.isPending ? 'Generating evidence-grounded additions…' : agentPlan ? 'Regenerate AI suggestions' : 'Generate AI suggestions'}
+            {generateAgentPlan.isPending ? 'Generating activation strategy…' : agentPlan?.source === 'ai_generated' ? 'Regenerate AI strategy' : 'Retry AI strategy'}
           </Button>
           <span role={agentFallback ? 'status' : undefined} className="text-[10px] leading-4 text-[#8994a9]">
-            {agentPlan ? 'AI suggestions generated; Qloo evidence and model hypotheses are shown separately below.' : agentFallback ? 'AI planning is unavailable or failed. The deterministic planner below remains active.' : 'The deterministic planner is active. AI suggestions are optional and require server configuration.'}
+            {agentPlan?.source === 'ai_generated' ? 'Complete strategy generated from fresh Qloo Insights evidence. Strategic recommendations remain hypotheses to validate.' : agentPlan?.source === 'deterministic_fallback' ? `Deterministic fallback · ${agentPlan.fallbackReason?.replaceAll('_', ' ') ?? 'AI strategy unavailable'}. This is not AI-generated.` : agentFallback ? 'AI strategy request failed. The existing deterministic planner is shown as an explicit fallback.' : generateAgentPlan.isPending ? 'Requesting an evidence-grounded AI strategy; deterministic content remains available as fallback.' : 'Preparing the AI strategy; deterministic content is clearly labeled until a result is available.'}
           </span>
         </div>
-        {agentPlan && <section className="mt-5 space-y-4 rounded-xl border border-cyan-100/10 bg-cyan-100/[.025] p-4">
-          <div>
-            <div className="eyebrow text-[9px] text-cyan-100/70">Observed Qloo evidence · provider results</div>
-            <ul className="mt-2 space-y-2">{agentPlan.evidence.map((item) => <li key={item.referenceId} className="text-[10px] leading-5 text-[#b8c5d5]"><strong>{item.name}</strong> · {item.kind} · ref {item.referenceId}{Object.entries(item.details).map(([key, value]) => <span key={key}> · {key}: {value ?? 'not returned'}</span>)}</li>)}</ul>
-            <p className="mt-3 text-[10px] text-cyan-100/60">References cited by the model: {agentPlan.evidenceReferences.join(', ')}</p>
-          </div>
-          {agentPlan.hypotheses.length > 0 && <div><div className="eyebrow text-[9px] text-amber-100/70">Model-generated hypotheses</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c7b995]">{agentPlan.hypotheses.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
-          {agentPlan.assumptions.length > 0 && <div><div className="eyebrow text-[9px] text-amber-100/70">Model-generated assumptions</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c7b995]">{agentPlan.assumptions.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
-          {agentPlan.recommendations.length > 0 && <div><div className="eyebrow text-[9px] text-violet-100/70">Model-generated recommendations</div><ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] leading-5 text-[#c8bddf]">{agentPlan.recommendations.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>}
-        </section>}
-        {agentPlan && <p className="mt-3 text-[9px] leading-4 text-[#8994a9]">{agentPlan.caveat}</p>}
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">{planContent.sections.map((section, i) => <div key={section.title} className="rounded-xl border border-white/[.07] bg-white/[.018] p-4"><div className="eyebrow text-[9px] text-[#8490a6]">0{i + 1} / {section.title}</div><p className="mt-2 text-[11px] leading-5 text-[#b0b9ca]">{section.content}</p></div>)}</div>
-        <div className="mt-4 rounded-xl border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]"><strong className="font-semibold text-[#d6c18f]">Planning assumptions</strong><ul className="mt-1 list-disc pl-4">{planContent.assumptions.map((x) => <li key={x}>{x}</li>)}</ul></div>
+        {agentPlan ? <ActivationStrategyView result={agentPlan} /> : <DeterministicPlanView planContent={planContent} requestFailed={agentFallback} />}
+        <p className="mt-4 text-[9px] leading-5 text-[#8994a9]">{agentPlan?.caveat ?? 'Deterministic fallback; no AI-generated strategy is available. The selected bridge and evidence above come from the saved discovery, not this planner request.'}</p>
       </Panel>
-      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
+      <Panel><div className="eyebrow text-[9px] text-[#78849a]">Save & share</div><h3 className="mt-1 text-[15px] font-semibold">Name this plan</h3><form className="mt-4 space-y-3" onSubmit={saveCurrent}><Field label="Plan title" required><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder={`${draft.form.city} cultural bridge`} data-testid="input-plan-title" /></Field><div className="rounded-lg border border-white/[.07] p-3 text-[10px] leading-5 text-[#808ca1]">Budget range: <span className="text-[#bec6d5]">{draft.form.budgetRange}</span><br />Source response: <span className="text-[#bec6d5]">{draft.response.source}</span></div>{saveError && <div className="text-[10px] text-rose-200">Plan could not be saved. Try again.</div>}<Button variant="primary" type="submit" className="w-full" disabled={!title.trim() || savePlan.isPending || generateAgentPlan.isPending}>{savePlan.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Bookmark size={14} />}{savePlan.isPending ? 'Saving plan…' : 'Save activation plan'}</Button><Button variant="outline" type="button" className="w-full" onClick={() => exportPlan(null)}><Download size={14} />{exported ? 'Brief exported' : 'Export brief as JSON'}</Button><Button variant="quiet" type="button" className="w-full" onClick={() => { setDraft(null); setAgentPlan(null); setAgentFallback(false); sessionStorage.removeItem('atlas:draft-plan'); }}>Discard working brief</Button></form></Panel>
     </div>}
     <Panel><div className="mb-4 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#78849a]">Workspace library</div><h2 className="mt-1 text-[16px] font-semibold">Saved activation plans</h2></div><span className="mono rounded-md border border-white/[.08] px-2 py-1 text-[9px] text-[#7c879c]">{plansQuery.data?.length ?? '—'} plans</span></div>
       {deleteFeedback?.type === 'error' && <div role="alert" className="mb-3 rounded-lg border border-rose-300/15 bg-rose-300/[.055] px-3 py-2 text-[10px] text-rose-100">{deleteFeedback.message}</div>}
@@ -697,18 +693,87 @@ function PlansPage() {
   </div>;
 }
 
+function StrategyBlock({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="rounded-xl border border-white/[.07] bg-white/[.018] p-4">
+    <div className="eyebrow text-[9px] text-[#8490a6]">{title}</div>
+    <div className="mt-2 text-[11px] leading-5 text-[#b0b9ca]">{children}</div>
+  </section>;
+}
+
+function EvidenceReferences({ references }: { references: string[] }) {
+  return references.length ? <div className="mt-2 flex flex-wrap gap-1.5">
+    {references.map((reference) => <span key={reference} className="mono rounded border border-cyan-100/15 bg-cyan-100/[.025] px-1.5 py-0.5 text-[8px] text-cyan-100/80">{reference}</span>)}
+  </div> : <span className="mt-1 block text-[9px] text-[#d3ae72]">No Qloo evidence reference; treat as an unverified hypothesis.</span>;
+}
+
+function ActivationStrategyView({ result }: { result: ActivationPlannerResponse }) {
+  const { strategy } = result;
+  return <div className="mt-5 space-y-3">
+    <div className="grid gap-3 md:grid-cols-2">
+      <StrategyBlock title="Executive opportunity summary">{strategy.executiveSummary}</StrategyBlock>
+      <StrategyBlock title="Opportunity hypothesis">{strategy.opportunity}</StrategyBlock>
+    </div>
+    <div className="grid gap-3 md:grid-cols-2">
+      <StrategyBlock title="Target audience hypothesis">
+        <p>{strategy.targetAudience.hypothesis}</p>
+        <div className="mt-3 space-y-2">{strategy.targetAudience.rationale.map((item, index) => <div key={`${index}-${item.claim}`} className="border-t border-white/[.06] pt-2"><p>{item.claim}</p><EvidenceReferences references={item.evidenceReferences} /></div>)}</div>
+      </StrategyBlock>
+      <StrategyBlock title="Cultural insights · Qloo-observed evidence">
+        <div className="space-y-3">{strategy.culturalInsights.length ? strategy.culturalInsights.map((item, index) => <div key={`${index}-${item.insight}`} className="border-t border-white/[.06] pt-2 first:border-0 first:pt-0"><p>{item.insight}</p><EvidenceReferences references={item.evidenceReferences} /></div>) : <p>No cultural insight was inferred in the deterministic fallback.</p>}</div>
+      </StrategyBlock>
+    </div>
+    <StrategyBlock title="Campaign concept · AI strategic hypothesis">
+      <h3 className="text-[13px] font-semibold text-[#dbe1ec]">{strategy.campaignConcept.name}</h3>
+      <p className="mt-1">{strategy.campaignConcept.narrative}</p>
+      <p className="mt-2"><strong className="text-[#cbd3e1]">Creative direction:</strong> {strategy.campaignConcept.creativeDirection}</p>
+    </StrategyBlock>
+    <div className="grid gap-3 md:grid-cols-2">
+      <StrategyBlock title="Activation channels"><ul className="list-disc space-y-1 pl-4">{strategy.activationChannels.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></StrategyBlock>
+      <StrategyBlock title="Potential partnership categories · no named partners"><ul className="list-disc space-y-1 pl-4">{strategy.partnershipCategories.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></StrategyBlock>
+    </div>
+    <StrategyBlock title="Execution timeline · sequence only, no dates assumed">
+      <div className="grid gap-3 md:grid-cols-2">{strategy.executionTimeline.map((phase, index) => <div key={`${index}-${phase.phase}`} className="border-l border-cyan-100/20 pl-3"><h4 className="font-semibold text-[#d5deeb]">{phase.phase}</h4><div className="mt-1"><span className="font-semibold text-[#9daac0]">Tasks</span><ul className="list-disc pl-4">{phase.tasks.map((task, taskIndex) => <li key={`${taskIndex}-${task}`}>{task}</li>)}</ul></div><div className="mt-1"><span className="font-semibold text-[#9daac0]">Deliverables</span><ul className="list-disc pl-4">{phase.deliverables.map((item, itemIndex) => <li key={`${itemIndex}-${item}`}>{item}</li>)}</ul></div></div>)}</div>
+    </StrategyBlock>
+    <div className="grid gap-3 md:grid-cols-2">
+      <StrategyBlock title="Success metrics · no forecast targets">
+        <div className="space-y-3">{strategy.successMetrics.map((item, index) => <div key={`${index}-${item.metric}`} className="border-t border-white/[.06] pt-2 first:border-0 first:pt-0"><strong className="text-[#d5deeb]">{item.metric}</strong><p>Why: {item.rationale}</p><p>Measure: {item.measurementMethod}</p></div>)}</div>
+      </StrategyBlock>
+      <StrategyBlock title="Risks and model assumptions">
+        <div className="space-y-3">{strategy.risksAndAssumptions.map((item, index) => <div key={`${index}-${item.statement}`} className="border-t border-white/[.06] pt-2 first:border-0 first:pt-0"><strong className="text-[#d5deeb]">{item.category === 'risk' ? 'Risk' : 'Model assumption'}:</strong> {item.statement}<p>Mitigation: {item.mitigation}</p></div>)}</div>
+      </StrategyBlock>
+    </div>
+    <StrategyBlock title="Validation experiments">
+      <div className="grid gap-3 md:grid-cols-2">{strategy.validationExperiments.map((item, index) => <div key={`${index}-${item.experiment}`}><strong className="text-[#d5deeb]">{item.experiment}</strong><p>Method: {item.method}</p><p>Decision signal: {item.decisionSignal}</p></div>)}</div>
+    </StrategyBlock>
+    <div className="grid gap-3 md:grid-cols-2">
+      <StrategyBlock title="User-provided assumptions · not independently verified"><ul className="list-disc space-y-1 pl-4">{result.userProvidedAssumptions.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></StrategyBlock>
+      <StrategyBlock title="Qloo evidence returned during this request">
+        <div className="space-y-2">{result.evidence.map((item) => <div key={item.referenceId} className="border-t border-white/[.06] pt-2 first:border-0 first:pt-0"><div className="flex flex-wrap items-center gap-2"><strong>{item.name}</strong><span className="mono text-cyan-100/80">{item.referenceId}</span><span className="text-[9px] text-[#8998ad]">{item.kind}</span></div><p className="mono mt-1 break-all text-[8px] text-[#8f9bb0]">{item.entityId}</p><p className="mt-1 text-[9px] text-[#9aa7ba]">{Object.entries(item.details).map(([key, value]) => `${key}: ${value ?? 'not returned'}`).join(' · ')}</p></div>)}</div>
+      </StrategyBlock>
+    </div>
+  </div>;
+}
+
+function DeterministicPlanView({ planContent, requestFailed }: { planContent: ReturnType<typeof buildActivationPlanContent>; requestFailed: boolean }) {
+  return <div className="mt-5">
+    <div role={requestFailed ? 'status' : undefined} className="rounded-lg border border-amber-100/15 bg-amber-100/[.035] p-3 text-[10px] leading-5 text-[#c5b78f]">Deterministic fallback · not AI-generated. {requestFailed ? 'The strategy request failed; use this plan as a starting point only.' : 'This existing template remains visible while an AI strategy is requested or when credentials/evidence are unavailable.'}</div>
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">{planContent.sections.map((section, index) => <StrategyBlock key={section.title} title={`0${index + 1} / ${section.title}`}>{section.content}</StrategyBlock>)}</div>
+    <div className="mt-3 rounded-xl border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]"><strong className="font-semibold text-[#d6c18f]">Planning assumptions</strong><ul className="mt-1 list-disc pl-4">{planContent.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></div>
+  </div>;
+}
+
 function PlanRow({ plan, expanded, onToggle, onExport, onDelete, deleting }: { plan: ActivationPlan; expanded: boolean; onToggle: () => void; onExport: () => void; onDelete: () => void; deleting: boolean }) {
   const details = getSavedPlanDetails(plan.plan);
   return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`row-plan-${plan.id}`}>
     <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[12px] font-semibold text-[#d6dbe6]">{plan.title}</h3><EvidenceKind kind="hypothesis" /></div><div className="mt-1 text-[10px] text-[#7e899f]">{plan.bridgeName} · {plan.city} · {formatDate(plan.createdAt)}</div><div className="mt-1 truncate text-[10px] text-[#909bb0]">{plan.interestA} × {plan.interestB}</div></div>
+      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[12px] font-semibold text-[#d6dbe6]">{plan.title}</h3>{details.strategySource ? <span className={cx('rounded-full border px-2 py-0.5 text-[8px]', details.strategySource === 'ai_generated' ? 'border-cyan-100/20 text-cyan-100' : 'border-amber-100/20 text-amber-100')}>{details.strategySource === 'ai_generated' ? 'AI-generated strategy' : 'Deterministic fallback · not AI-generated'}</span> : <EvidenceKind kind="hypothesis" />}</div><div className="mt-1 text-[10px] text-[#7e899f]">{plan.bridgeName} · {plan.city} · {formatDate(plan.createdAt)}</div><div className="mt-1 truncate text-[10px] text-[#909bb0]">{plan.interestA} × {plan.interestB}</div></div>
       <div className="flex shrink-0 items-center gap-1"><Button variant="quiet" onClick={onToggle} className="text-[10px]" aria-expanded={expanded}>{expanded ? 'Close details' : 'Inspect plan'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="quiet" onClick={onExport} className="text-[10px]"><Download size={13} />Export</Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${plan.title}`}><Trash2 size={14} /></Button></div>
     </div>
     {expanded && <div className="mt-4 space-y-4 border-t border-white/[.07] pt-4">
       <div className="rounded-lg border border-white/[.07] bg-white/[.018] p-3 text-[10px] leading-5 text-[#aeb8ca]"><div><strong className="text-[#d3d9e5]">Bridge:</strong> {plan.bridgeName || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">Inputs:</strong> {plan.interestA || 'Not recorded'} × {plan.interestB || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">City/locality:</strong> {plan.city || 'Not recorded'}</div>{plan.objective && <div><strong className="text-[#d3d9e5]">Objective:</strong> {plan.objective}</div>}</div>
       <div className="rounded-lg border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]">This is the stored plan snapshot. It does not refresh automatically or remain linked to a discovery record.</div>
       <section><div className="eyebrow text-[9px] text-[#78849a]">Stored source evidence</div>{details.source && <div className="mt-1 text-[9px] text-[#909bb0]">Response source: {details.source}</div>}{details.evidence.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.evidence.map((item, index) => <div key={`${item.source}-${index}`} className="rounded-lg border border-cyan-100/[.08] bg-cyan-100/[.02] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#c5ccda]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#929db2]">{item.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">Source · {item.source}</div></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored evidence details are available on this plan.</p>}{details.caveat && <p className="mt-2 text-[10px] leading-5 text-[#aab4c6]">Stored caveat: {details.caveat}</p>}</section>
-      <section><div className="eyebrow text-[9px] text-[#bca26d]">Generated planning content · hypotheses and unsourced suggestions</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
+      <section><div className="eyebrow text-[9px] text-[#bca26d]">{details.strategySource === 'ai_generated' ? 'AI-generated strategy · Qloo citations preserved' : details.strategySource === 'deterministic_fallback' ? 'Deterministic fallback · not AI-generated' : 'Stored planning content · historical record'}</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.userProvidedAssumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">User-provided assumptions · not independently verified</div><ul className="mt-1 list-disc pl-4">{details.userProvidedAssumptions.map((assumption, index) => <li key={`user-${index}-${assumption}`}>{assumption}</li>)}</ul></div>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored planning assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
       <section className="rounded-lg border border-white/[.07] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Budget constraint</div>{details.budgetRange || details.budgetStatus ? <><div className="mt-1 text-[10px] text-[#c5ccda]">{details.budgetRange ?? 'Range not recorded'}</div>{details.budgetStatus && <div className="mt-1 text-[9px] text-[#8792a6]">{details.budgetStatus}</div>}</> : <p className="mt-1 text-[10px] text-[#8792a6]">No budget constraint was stored.</p>}</section>
     </div>}
   </article>;
@@ -772,7 +837,7 @@ function SettingsPage() {
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <div className="space-y-5">
         <Panel><div className="flex items-start justify-between gap-4"><div><div className="eyebrow text-[9px] text-[#8d7fc4]">Cultural graph provider</div><h2 className="mt-1 text-[17px] font-semibold">Qloo connection</h2><p className="mt-2 max-w-[560px] text-[11px] leading-5 text-[#8792a7]">Connection state is reported by the API. “Configured” does not mean a request has been verified; failed or unverified states remain explicit.</p></div><div className="hidden h-10 w-10 items-center justify-center rounded-xl border border-violet-100/10 bg-violet-100/[.04] text-[#a994f1] sm:flex"><Activity size={19} /></div></div>
-          <div className="mt-5 rounded-xl border border-white/[.07] bg-[#0c111d]/60 p-4">{status.isLoading ? <Skeleton className="h-16" /> : status.isError ? <ErrorNotice title="Qloo status could not be read" onRetry={() => status.refetch()} /> : status.data ? <><div className="flex flex-wrap items-center justify-between gap-3"><StatusPill status={status.data} /><span className="mono text-[9px] text-[#707c91]">State · {status.data.state}</span></div><p className="mt-3 text-[11px] leading-5 text-[#9aa4b7]">{status.data.message}</p><div className="mt-3 grid gap-2 border-t border-white/[.06] pt-3 sm:grid-cols-3"><SettingValue label="Configured" value={status.data.configured ? 'Yes' : 'No'} /><SettingValue label="Verified" value={status.data.verified ? 'Yes' : 'No'} /><SettingValue label="Last checked" value={status.data.checkedAt ? formatDate(status.data.checkedAt) : 'Not recorded'} /></div></> : null}</div>
+          <div className="mt-5 rounded-xl border border-white/[.07] bg-[#0c111d]/60 p-4">{status.isLoading ? <Skeleton className="h-16" /> : status.isError ? <ErrorNotice title="Qloo status could not be read" onRetry={() => status.refetch()} /> : status.data ? <><div className="flex flex-wrap items-center justify-between gap-3"><StatusPill status={status.data} /><span className="mono text-[9px] text-[#707c91]">State · {status.data.state}</span></div><p className="mt-3 text-[11px] leading-5 text-[#9aa4b7]">{status.data.message}</p><div className="mt-3 grid gap-2 border-t border-white/[.06] pt-3 sm:grid-cols-3"><SettingValue label="Configured" value={status.data.configured ? 'Yes' : 'No'} /><SettingValue label="Verified" value={status.data.verified ? 'Yes' : 'No'} /><SettingValue label="Last successful request" value={status.data.checkedAt ? formatDate(status.data.checkedAt) : 'Not recorded'} /></div></> : null}</div>
           <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); if (!testQuery.trim()) return; test.mutate({ data: { query: testQuery } }, { onSuccess: (result) => { qc.setQueryData(getGetQlooStatusQueryKey(), result); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); } }); }}>
             <input className="field" value={testQuery} onChange={(e) => setTestQuery(e.target.value)} maxLength={120} aria-label="Connection test query" data-testid="input-connection-query" />
             <Button variant="primary" type="submit" disabled={!testQuery.trim() || test.isPending} className="shrink-0">{test.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <ShieldCheck size={14} />}Test connection</Button>

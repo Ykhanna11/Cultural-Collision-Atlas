@@ -5,15 +5,16 @@
  * Cultural Collision Atlas API
  * OpenAPI spec version: 0.2.0
  */
+import type { ActivationPlannerResponseFallbackReason } from './activationPlannerResponseFallbackReason';
 import type { ActivationPlannerResponseSource } from './activationPlannerResponseSource';
+import type { ActivationStrategy } from './activationStrategy';
 import type { AgentEvidence } from './agentEvidence';
 
 export interface ActivationPlannerResponse {
   source: ActivationPlannerResponseSource;
+  fallbackReason?: ActivationPlannerResponseFallbackReason;
   caveat: string;
-  evidenceReferences: string[];
-  hypotheses: string[];
-  assumptions: string[];
-  recommendations: string[];
+  strategy: ActivationStrategy;
+  userProvidedAssumptions: string[];
   evidence: AgentEvidence[];
 }

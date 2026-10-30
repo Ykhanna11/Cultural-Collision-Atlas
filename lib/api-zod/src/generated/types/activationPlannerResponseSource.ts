@@ -10,5 +10,6 @@ export type ActivationPlannerResponseSource = typeof ActivationPlannerResponseSo
 
 
 export const ActivationPlannerResponseSource = {
-  openai_qloo_agent: 'openai_qloo_agent',
+  ai_generated: 'ai_generated',
+  deterministic_fallback: 'deterministic_fallback',
 } as const;

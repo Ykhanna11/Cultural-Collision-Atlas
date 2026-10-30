@@ -90,6 +90,14 @@ test("health and provider APIs work without cookies or CSRF tokens", async () =>
     body: JSON.stringify({ query: "test" }),
   });
   assert.equal(connectionTest.status, 200);
+  assert.deepEqual(await connectionTest.json(), {
+    state: "not_configured",
+    configured: false,
+    verified: false,
+    message:
+      "Qloo is not connected. Configure QLOO_API_KEY in the server environment, then test the connection again.",
+    checkedAt: null,
+  });
 
   const agentValidation = await fetch(`${baseUrl}/activation-plans/agent`, {
     method: "POST",
@@ -116,7 +124,94 @@ test("health and provider APIs work without cookies or CSRF tokens", async () =>
       bridgeName: "Culture market",
     }),
   });
-  assert.equal(unavailableAgent.status, 503);
+  assert.equal(unavailableAgent.status, 200);
+  const fallbackPlan = await unavailableAgent.json() as {
+    source: string;
+    fallbackReason: string;
+    caveat: string;
+  };
+  assert.equal(fallbackPlan.source, "deterministic_fallback");
+  assert.equal(fallbackPlan.fallbackReason, "credentials_unavailable");
+  assert.match(fallbackPlan.caveat, /not AI-generated/);
+});
+
+test("workspace database failures return a generic JSON error without connection details", async () => {
+  const response = await fetch(`${baseUrl}/activation-plans`);
+  assert.equal(response.status, 503);
+  assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+  const body = await response.text();
+  assert.match(body, /Public demo workspace is temporarily unavailable/);
+  assert.doesNotMatch(body, /postgres:\/\/|synthetic_test_user|synthetic_test_password|DATABASE_URL/i);
+});
+
+test("entity search forwards Qloo entities, distinguishes empty results, and preserves provider errors", async (context) => {
+  const previousKey = process.env.QLOO_API_KEY;
+  process.env.QLOO_API_KEY = "route-test-only";
+  let upstreamStatus = 200;
+  let upstreamPayload: unknown = {
+    success: true,
+    results: [{
+      entity_id: "a0c4e68e-031c-4c54-8f5a-51a48fcf6651",
+      name: "Nike",
+      type: "urn:entity:brand",
+      subtype: "sportswear",
+    }],
+  };
+  const realFetch = globalThis.fetch;
+  context.mock.method(globalThis, "fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = new URL(String(input));
+    if (url.origin !== "https://hackathon.api.qloo.com") {
+      return realFetch(input, init);
+    }
+    return new Response(JSON.stringify(upstreamPayload), { status: upstreamStatus });
+  });
+
+  try {
+    const success = await fetch(`${baseUrl}/qloo/entities/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "Nike", types: ["urn:entity:brand"] }),
+    });
+    assert.equal(success.status, 200);
+    const result = await success.json() as {
+      source: string;
+      entities: Array<{
+        id: string;
+        name: string;
+        type: string | null;
+        subtype: string | null;
+      }>;
+    };
+    assert.equal(result.source, "qloo_api");
+    assert.equal(result.entities[0].name, "Nike");
+    assert.equal(result.entities[0].id, "a0c4e68e-031c-4c54-8f5a-51a48fcf6651");
+    assert.equal(result.entities[0].type, "urn:entity:brand");
+    assert.equal(result.entities[0].subtype, "sportswear");
+
+    upstreamStatus = 404;
+    upstreamPayload = { code: 404, reason: "Not Found", message: "No results" };
+    const empty = await fetch(`${baseUrl}/qloo/entities/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "No catalog match" }),
+    });
+    assert.equal(empty.status, 200);
+    const emptyResult = await empty.json() as { entities: unknown[] };
+    assert.deepEqual(emptyResult.entities, []);
+
+    upstreamStatus = 429;
+    const rateLimited = await fetch(`${baseUrl}/qloo/entities/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "Naruto" }),
+    });
+    assert.equal(rateLimited.status, 429);
+    const rateLimitError = await rateLimited.json() as { error: string };
+    assert.match(rateLimitError.error, /No substitute or sample results/);
+  } finally {
+    if (previousKey === undefined) delete process.env.QLOO_API_KEY;
+    else process.env.QLOO_API_KEY = previousKey;
+  }
 });
 
 test("public writes retain request validation and abuse limits", async () => {

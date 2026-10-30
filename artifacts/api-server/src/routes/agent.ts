@@ -3,9 +3,8 @@ import {
   GenerateActivationPlanWithAgentBody,
   GenerateActivationPlanWithAgentResponse,
 } from "@workspace/api-zod";
-import { isQlooConfigured } from "../lib/qloo/client";
 import {
-  ActivationPlannerError,
+  createDeterministicActivationPlan,
   runLiveActivationPlanner,
 } from "../lib/agent/activation-planner";
 import { providerRateLimit } from "../lib/provider-rate-limit";
@@ -21,48 +20,33 @@ router.post(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    if (!process.env.OPENAI_API_KEY?.trim() || !process.env.OPENAI_MODEL?.trim()) {
-      res.status(503).json({
-        error: "AI planning is unavailable. Configure OPENAI_API_KEY and OPENAI_MODEL.",
-      });
-      return;
-    }
-    if (!isQlooConfigured()) {
-      res.status(503).json({
-        error: "AI planning is unavailable because Qloo is not configured.",
-      });
-      return;
-    }
-
     try {
       const result = await runLiveActivationPlanner({
         ...parsed.data.input,
         bridgeId: parsed.data.bridgeId,
         bridgeName: parsed.data.bridgeName,
       });
-      res.json(GenerateActivationPlanWithAgentResponse.parse(result));
-    } catch (error) {
-      if (error instanceof ActivationPlannerError) {
-        const status =
-          error.reason === "invalid_tool_call" ||
-          error.reason === "invalid_model_output"
-            ? 502
-            : error.reason === "budget_exhausted"
-              ? 429
-              : error.reason === "insufficient_evidence"
-                ? 422
-                : 502;
-        req.log.warn(
-          { reason: error.reason },
-          "AI activation planning stopped safely",
+      if (result.source === "deterministic_fallback") {
+        req.log.info(
+          { source: result.source, fallbackReason: result.fallbackReason },
+          "Returning deterministic activation plan fallback",
         );
-        res.status(status).json({ error: error.message });
-        return;
       }
+      res.json(GenerateActivationPlanWithAgentResponse.parse(result));
+    } catch {
       req.log.warn("AI activation planning failed.");
-      res.status(502).json({
-        error: "AI activation planning failed. Use the deterministic planner instead.",
-      });
+      res.json(
+        GenerateActivationPlanWithAgentResponse.parse(
+          createDeterministicActivationPlan(
+            {
+              ...parsed.data.input,
+              bridgeId: parsed.data.bridgeId,
+              bridgeName: parsed.data.bridgeName,
+            },
+            "model_or_provider_failure",
+          ),
+        ),
+      );
     }
   },
 );

@@ -2,6 +2,7 @@ import type {
   BridgeCandidate,
   DiscoveryInput,
   DiscoveryResponse,
+  ActivationStrategy,
   ActivationPlannerResponse,
 } from "@workspace/api-client-react";
 
@@ -97,44 +98,94 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
   };
 }
 
+export function buildActivationStrategySections(strategy: ActivationStrategy) {
+  const cited = (text: string, references: string[]) =>
+    `${text}${references.length ? ` [${references.join(", ")}]` : ""}`;
+
+  return [
+    { title: "Executive opportunity summary", content: strategy.executiveSummary },
+    { title: "Opportunity hypothesis", content: strategy.opportunity },
+    {
+      title: "Target audience hypothesis",
+      content: [
+        strategy.targetAudience.hypothesis,
+        ...strategy.targetAudience.rationale.map(({ claim, evidenceReferences }) =>
+          cited(claim, evidenceReferences),
+        ),
+      ].join("\n"),
+    },
+    {
+      title: "Cultural insights · Qloo evidence",
+      content: strategy.culturalInsights
+        .map(({ insight, evidenceReferences }) => cited(insight, evidenceReferences))
+        .join("\n"),
+    },
+    {
+      title: "Campaign concept",
+      content: `${strategy.campaignConcept.name}\n${strategy.campaignConcept.narrative}\nCreative direction: ${strategy.campaignConcept.creativeDirection}`,
+    },
+    {
+      title: "Activation channels",
+      content: strategy.activationChannels.join("\n"),
+    },
+    {
+      title: "Partnership categories",
+      content: strategy.partnershipCategories.join("\n"),
+    },
+    {
+      title: "Execution timeline",
+      content: strategy.executionTimeline
+        .map(({ phase, tasks, deliverables }) =>
+          `${phase}\nTasks: ${tasks.join("; ")}\nDeliverables: ${deliverables.join("; ")}`,
+        )
+        .join("\n\n"),
+    },
+    {
+      title: "Success metrics",
+      content: strategy.successMetrics
+        .map(({ metric, rationale, measurementMethod }) =>
+          `${metric}\nWhy: ${rationale}\nMeasure: ${measurementMethod}`,
+        )
+        .join("\n\n"),
+    },
+    {
+      title: "Risks and assumptions",
+      content: strategy.risksAndAssumptions
+        .map(({ category, statement, mitigation }) =>
+          `${category === "risk" ? "Risk" : "Model assumption"}: ${statement}\nMitigation: ${mitigation}`,
+        )
+        .join("\n\n"),
+    },
+    {
+      title: "Validation experiments",
+      content: strategy.validationExperiments
+        .map(({ experiment, method, decisionSignal }) =>
+          `${experiment}\nMethod: ${method}\nDecision signal: ${decisionSignal}`,
+        )
+        .join("\n\n"),
+    },
+  ];
+}
+
 export function buildActivationPlanSaveInput(
   title: string,
   draft: ActivationPlanDraft,
   plan: ReturnType<typeof buildActivationPlanContent>,
   agentResult?: ActivationPlannerResponse,
 ) {
-  const agentSections = agentResult
-    ? [
-        {
-          title: "Observed Qloo evidence",
-          content: agentResult.evidence
-            .map(({ referenceId, name, kind, details }) =>
-              `${name} (${kind}; ${referenceId})` +
-              (Object.entries(details).length
-                ? `: ${Object.entries(details)
-                    .map(([key, value]) => `${key}=${value ?? "not returned"}`)
-                    .join(", ")}`
-                : ""),
-            )
-            .join("\n"),
-        },
-        {
-          title: "Model-generated hypotheses",
-          content: agentResult.hypotheses.join("\n"),
-        },
-        {
-          title: "Model-generated assumptions",
-          content: agentResult.assumptions.join("\n"),
-        },
-        {
-          title: "Model-generated recommendations",
-          content: agentResult.recommendations.join("\n"),
-        },
-        {
-          title: "AI planning caveat",
-          content: `${agentResult.caveat} Evidence references cited: ${agentResult.evidenceReferences.join(", ")}.`,
-        },
-      ]
+  const aiGenerated = agentResult?.source === "ai_generated";
+  const strategyEvidence = agentResult?.evidence.map((item) => ({
+    source: "Qloo Insights API",
+    label: `${item.kind} · ${item.referenceId}`,
+    value: `${item.name} (${item.entityId})${Object.entries(item.details).length
+      ? ` · ${Object.entries(item.details)
+          .map(([key, value]) => `${key}=${value ?? "not returned"}`)
+          .join(", ")}`
+      : ""}`,
+    kind: "observed_api" as const,
+  })) ?? [];
+  const strategySections = agentResult
+    ? buildActivationStrategySections(agentResult.strategy)
     : [];
   return {
     title,
@@ -143,13 +194,22 @@ export function buildActivationPlanSaveInput(
     interestB: draft.form.interestB,
     bridgeName: draft.candidate.name,
     objective: draft.form.objective,
-    plan: agentResult
-      ? {
-          ...plan,
-          sections: [...plan.sections, ...agentSections],
-          agent: agentResult,
-        }
-      : plan,
+    plan: {
+      ...plan,
+      sections: aiGenerated ? strategySections : plan.sections,
+      strategySource: agentResult?.source ?? "deterministic_fallback",
+      ...(agentResult && {
+        strategy: agentResult.strategy,
+        userProvidedAssumptions: agentResult.userProvidedAssumptions,
+        agent: agentResult,
+        ...(agentResult.fallbackReason && {
+          fallbackReason: agentResult.fallbackReason,
+        }),
+      }),
+      evidence: [...plan.evidence, ...strategyEvidence],
+      source: plan.source,
+      caveat: agentResult?.caveat ?? plan.caveat,
+    },
   };
 }
 

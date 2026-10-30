@@ -37,12 +37,15 @@ export function recordQlooError(status: number): void {
 
 export function getQlooStatus() {
   const configured = isQlooConfigured();
-  const verified = configured && verifiedAt !== null;
+  const verified = configured && verifiedAt !== null && lastError === null;
+  const errorMessage = lastError
+    ? `${lastError}${verifiedAt ? ` Last successful Qloo request: ${verifiedAt.toISOString()}.` : ""}`
+    : null;
 
   return {
     state: !configured
       ? ("not_configured" as const)
-      : lastError
+      : errorMessage
         ? ("error" as const)
         : verified
           ? ("verified" as const)
@@ -51,9 +54,9 @@ export function getQlooStatus() {
     verified,
     message: !configured
       ? "Qloo is not connected. Add QLOO_API_KEY to the project's Secrets to enable live requests."
-      : lastError ??
+      : errorMessage ??
         (verified
-          ? `An authenticated Qloo request succeeded at ${verifiedAt?.toISOString()}.`
+          ? `The most recent authenticated Qloo request succeeded at ${verifiedAt?.toISOString()}.`
           : "QLOO_API_KEY is set, but a live request has not verified the connection yet."),
     checkedAt: verifiedAt,
   };
@@ -99,9 +102,10 @@ export async function qlooGet<T = unknown>(
     );
   }
 
-  recordQlooSuccess();
   try {
-    return (await response.json()) as T;
+    const payload = (await response.json()) as T;
+    recordQlooSuccess();
+    return payload;
   } catch {
     recordQlooError(502);
     throw new QlooApiError("Qloo returned a response that was not valid JSON.", 502);

@@ -1,4 +1,9 @@
-import { isRecord, qlooGet } from "./client";
+import {
+  isRecord,
+  QlooApiError,
+  qlooGet,
+  recordQlooSuccess,
+} from "./client";
 
 export interface QlooEntity {
   id: string;
@@ -28,32 +33,45 @@ export async function searchQlooEntities(
   query: string,
   types?: QlooEntitySearchType[],
 ): Promise<QlooEntity[]> {
-  const payload = await qlooGet<unknown>("/search", {
-    query,
-    take: "8",
-    ...(types && { types }),
-  });
+  let payload: unknown;
+  try {
+    payload = await qlooGet<unknown>("/search", {
+      query,
+      take: "8",
+      ...(types && { types }),
+    });
+  } catch (error) {
+    if (error instanceof QlooApiError && error.status === 404) {
+      recordQlooSuccess();
+      return [];
+    }
+    throw error;
+  }
   return parseQlooEntityResults(payload);
 }
 
 export function parseQlooEntityResults(payload: unknown): QlooEntity[] {
   const root = isRecord(payload) ? payload : null;
+  if (root && "success" in root && root.success !== true) {
+    throw new Error("Qloo entity search reported an unsuccessful response.");
+  }
   const rawResults = root?.results;
-  const entities = Array.isArray(rawResults)
-    ? rawResults
-    : isRecord(rawResults) && Array.isArray(rawResults.entities)
-      ? rawResults.entities
-      : null;
-
-  if (!Array.isArray(entities)) {
+  if (!Array.isArray(rawResults)) {
     throw new Error("Qloo entity search returned an unrecognized response shape.");
   }
 
-  return entities.flatMap((entity): QlooEntity[] => {
-    if (!isRecord(entity)) return [];
+  return rawResults.map((entity, index): QlooEntity => {
+    if (!isRecord(entity)) {
+      throw new Error(`Qloo entity search result ${index} was not an object.`);
+    }
     const id = entity.entity_id;
     const name = entity.name;
-    if (typeof id !== "string" || typeof name !== "string") return [];
+    if (!isQlooEntityId(id)) {
+      throw new Error(`Qloo entity search result ${index} had an invalid entity_id.`);
+    }
+    if (typeof name !== "string" || !name.trim()) {
+      throw new Error(`Qloo entity search result ${index} had an invalid name.`);
+    }
     const properties = isRecord(entity.properties) ? entity.properties : null;
     const rawDescription =
       (typeof entity.description === "string" && entity.description) ||
@@ -68,7 +86,7 @@ export function parseQlooEntityResults(payload: unknown): QlooEntity[] {
     const ancestors = Array.isArray(properties?.ancestors)
       ? properties.ancestors
       : [];
-    return [{
+    return {
       id,
       name,
       type:
@@ -92,7 +110,7 @@ export function parseQlooEntityResults(payload: unknown): QlooEntity[] {
           : [],
       ),
       source: "qloo_api",
-    }];
+    };
   });
 }
 

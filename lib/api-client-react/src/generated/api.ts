@@ -340,7 +340,7 @@ return customFetch<QlooStatus>(getTestQlooConnectionUrl(),
 
 export const getTestQlooConnectionMutationKey = () => ['testQlooConnection'] as const;
 
-export const getTestQlooConnectionMutationOptions = <TError = ErrorType<ErrorResponse>,
+export const getTestQlooConnectionMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testQlooConnection>>, TError,TestQlooConnectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof testQlooConnection>>, TError,TestQlooConnectionMutationVariables, TContext> => {
 
@@ -369,13 +369,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type TestQlooConnectionMutationResult = NonNullable<Awaited<ReturnType<typeof testQlooConnection>>>
     export type TestQlooConnectionMutationBody = BodyType<QlooTestInput>
-    export type TestQlooConnectionMutationError = ErrorType<ErrorResponse>
+    export type TestQlooConnectionMutationError = ErrorType<unknown>
     export type TestQlooConnectionMutationVariables = {data: BodyType<QlooTestInput>}
 
     /**
  * @summary Verify the Qloo connection
  */
-export const useTestQlooConnection = <TError = ErrorType<ErrorResponse>,
+export const useTestQlooConnection = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testQlooConnection>>, TError,TestQlooConnectionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof testQlooConnection>>,

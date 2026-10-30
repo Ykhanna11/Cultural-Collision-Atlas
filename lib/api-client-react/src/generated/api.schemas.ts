@@ -29,7 +29,10 @@ export interface QlooStatus {
   configured: boolean;
   verified: boolean;
   message: string;
-  /** @nullable */
+  /**
+     * Timestamp of the most recent successful authenticated Qloo request; retained as historical context after later failures.
+     * @nullable
+     */
   checkedAt?: string | null;
 }
 
@@ -202,16 +205,215 @@ export type ActivationPlannerResponseSource = typeof ActivationPlannerResponseSo
 
 
 export const ActivationPlannerResponseSource = {
-  openai_qloo_agent: 'openai_qloo_agent',
+  ai_generated: 'ai_generated',
+  deterministic_fallback: 'deterministic_fallback',
 } as const;
+
+export type ActivationPlannerResponseFallbackReason = typeof ActivationPlannerResponseFallbackReason[keyof typeof ActivationPlannerResponseFallbackReason];
+
+
+export const ActivationPlannerResponseFallbackReason = {
+  credentials_unavailable: 'credentials_unavailable',
+  insufficient_evidence: 'insufficient_evidence',
+  invalid_structured_output: 'invalid_structured_output',
+  model_or_provider_failure: 'model_or_provider_failure',
+} as const;
+
+export type ActivationStrategyRisksAndAssumptionsItemCategory = typeof ActivationStrategyRisksAndAssumptionsItemCategory[keyof typeof ActivationStrategyRisksAndAssumptionsItemCategory];
+
+
+export const ActivationStrategyRisksAndAssumptionsItemCategory = {
+  risk: 'risk',
+  model_assumption: 'model_assumption',
+} as const;
+
+export type ActivationStrategyTargetAudienceRationaleItem = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  claim: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     * @items.minLength 1
+     * @items.maxLength 32
+     */
+  evidenceReferences: string[];
+};
+
+export type ActivationStrategyTargetAudience = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  hypothesis: string;
+  /** @maxItems 8 */
+  rationale: ActivationStrategyTargetAudienceRationaleItem[];
+};
+
+export type ActivationStrategyCulturalInsightsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  insight: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     * @items.minLength 1
+     * @items.maxLength 32
+     */
+  evidenceReferences: string[];
+};
+
+export type ActivationStrategyCampaignConcept = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  narrative: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  creativeDirection: string;
+};
+
+export type ActivationStrategyExecutionTimelineItem = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  phase: string;
+  /**
+     * @minItems 1
+     * @maxItems 6
+     * @items.minLength 1
+     * @items.maxLength 700
+     */
+  tasks: string[];
+  /**
+     * @minItems 1
+     * @maxItems 6
+     * @items.minLength 1
+     * @items.maxLength 700
+     */
+  deliverables: string[];
+};
+
+export type ActivationStrategySuccessMetricsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  metric: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  rationale: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  measurementMethod: string;
+};
+
+export type ActivationStrategyRisksAndAssumptionsItem = {
+  category: ActivationStrategyRisksAndAssumptionsItemCategory;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  statement: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  mitigation: string;
+};
+
+export type ActivationStrategyValidationExperimentsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  experiment: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  method: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  decisionSignal: string;
+};
+
+export interface ActivationStrategy {
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  executiveSummary: string;
+  /**
+     * @minLength 1
+     * @maxLength 700
+     */
+  opportunity: string;
+  targetAudience: ActivationStrategyTargetAudience;
+  /** @maxItems 8 */
+  culturalInsights: ActivationStrategyCulturalInsightsItem[];
+  campaignConcept: ActivationStrategyCampaignConcept;
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     * @items.maxLength 700
+     */
+  activationChannels: string[];
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     * @items.maxLength 700
+     */
+  partnershipCategories: string[];
+  /**
+     * @minItems 2
+     * @maxItems 8
+     */
+  executionTimeline: ActivationStrategyExecutionTimelineItem[];
+  /**
+     * @minItems 1
+     * @maxItems 8
+     */
+  successMetrics: ActivationStrategySuccessMetricsItem[];
+  /**
+     * @minItems 1
+     * @maxItems 8
+     */
+  risksAndAssumptions: ActivationStrategyRisksAndAssumptionsItem[];
+  /**
+     * @minItems 1
+     * @maxItems 6
+     */
+  validationExperiments: ActivationStrategyValidationExperimentsItem[];
+}
 
 export interface ActivationPlannerResponse {
   source: ActivationPlannerResponseSource;
+  fallbackReason?: ActivationPlannerResponseFallbackReason;
   caveat: string;
-  evidenceReferences: string[];
-  hypotheses: string[];
-  assumptions: string[];
-  recommendations: string[];
+  strategy: ActivationStrategy;
+  userProvidedAssumptions: string[];
   evidence: AgentEvidence[];
 }
 

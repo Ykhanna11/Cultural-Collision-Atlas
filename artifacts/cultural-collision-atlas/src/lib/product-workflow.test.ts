@@ -169,6 +169,7 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     reopenedPlanDetails.budgetStatus,
     "User-supplied planning input only; not a cost estimate or supplier quote.",
   );
+  assert.equal(reopenedPlanDetails.strategySource, "deterministic_fallback");
   assert.equal("agent" in planPayload.plan, false);
   assert.ok(
     reopenedPlanDetails.sections.some((section) =>
@@ -178,13 +179,57 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     ),
   );
 
+  const strategy: ActivationPlannerResponse["strategy"] = {
+    executiveSummary: "Test a co-created opt-in pilot; audience fit remains a hypothesis.",
+    opportunity: "Explore a bridge suggested by aggregate Qloo Insights results.",
+    targetAudience: {
+      hypothesis: "People interested in either input may consider the pilot.",
+      rationale: [{
+        claim: "Qloo returned a candidate from the joint-interest request.",
+        evidenceReferences: ["qloo-1-1"],
+      }],
+    },
+    culturalInsights: [{
+      insight: "The candidate appeared in the joint-interest recommendation results.",
+      evidenceReferences: ["qloo-1-1"],
+    }],
+    campaignConcept: {
+      name: "Culture in Common",
+      narrative: "A participatory pop-up concept for audience testing.",
+      creativeDirection: "Invite local contributors to shape an opt-in pilot.",
+    },
+    activationChannels: ["Small opt-in event"],
+    partnershipCategories: ["Local cultural contributors"],
+    executionTimeline: [{
+      phase: "Validate",
+      tasks: ["Test the concept with an opt-in sample."],
+      deliverables: ["Document participant feedback."],
+    }, {
+      phase: "Pilot",
+      tasks: ["Run only after permissions and costs are confirmed."],
+      deliverables: ["Record agreed success metrics."],
+    }],
+    successMetrics: [{
+      metric: "Participant-reported relevance",
+      rationale: "Tests stated interest without forecasting attendance.",
+      measurementMethod: "Use a post-experience participant survey.",
+    }],
+    risksAndAssumptions: [{
+      category: "risk",
+      statement: "The concept may not resonate with the intended audience.",
+      mitigation: "Test before committing to production.",
+    }],
+    validationExperiments: [{
+      experiment: "Opt-in concept test",
+      method: "Show a neutral concept and ask participants for feedback.",
+      decisionSignal: "Participant-reported relevance.",
+    }],
+  };
   const agentResult: ActivationPlannerResponse = {
-    source: "openai_qloo_agent",
+    source: "ai_generated",
     caveat: "Aggregate Qloo evidence does not establish audience overlap.",
-    evidenceReferences: ["qloo-1-1"],
-    hypotheses: ["A co-created pop-up could be tested."],
-    assumptions: ["The concept needs audience validation."],
-    recommendations: ["Run a small opt-in concept test."],
+    strategy,
+    userProvidedAssumptions: ["The budget range is user-provided, not a quote."],
     evidence: [
       {
         referenceId: "qloo-1-1",
@@ -203,12 +248,18 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     agentResult,
   );
   assert.deepEqual(agentPlanPayload.plan.agent, agentResult);
+  assert.deepEqual(agentPlanPayload.plan.strategy, strategy);
+  assert.equal(agentPlanPayload.plan.strategySource, "ai_generated");
+  assert.ok(agentPlanPayload.plan.sections.some((section) =>
+    section.content.includes("qloo-1-1"),
+  ));
+  assert.equal(
+    getSavedPlanDetails(agentPlanPayload.plan).strategySource,
+    "ai_generated",
+  );
   assert.deepEqual(
-    getSavedPlanDetails(agentPlanPayload.plan).sections.at(-2),
-    {
-      title: "Model-generated recommendations",
-      content: "Run a small opt-in concept test.",
-    },
+    getSavedPlanDetails(agentPlanPayload.plan).userProvidedAssumptions,
+    ["The budget range is user-provided, not a quote."],
   );
 
   const olderPlan = getSavedPlanDetails({

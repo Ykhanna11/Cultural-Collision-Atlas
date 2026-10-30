@@ -1,8 +1,9 @@
-import express, { type Express } from "express";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import { fileURLToPath } from "node:url";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { PublicDemoWorkspaceInitializationError } from "./lib/workspace-scope";
 
 export function createApp(
   options: {
@@ -40,6 +41,15 @@ export function createApp(
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "API route not found." });
   });
+
+  const workspaceErrorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+    if (error instanceof PublicDemoWorkspaceInitializationError) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+    next(error);
+  };
+  app.use(workspaceErrorHandler);
 
   if (process.env.NODE_ENV === "production") {
     const frontendDist = fileURLToPath(

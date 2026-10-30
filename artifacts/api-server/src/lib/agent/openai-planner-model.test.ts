@@ -23,10 +23,52 @@ test("adapts function calls, submits their outputs, and returns structured outpu
       id: "response_with_final_plan",
       output: [],
       output_text: JSON.stringify({
-        evidenceReferences: ["qloo-1-1"],
-        hypotheses: ["A shared event may be worth testing."],
-        assumptions: ["The audience should be validated."],
-        recommendations: ["Start with an opt-in pilot."],
+        strategy: {
+          executiveSummary: "Test a small activation as a hypothesis.",
+          opportunity: "Explore a bridge returned by aggregate Qloo Insights.",
+          targetAudience: {
+            hypothesis: "People interested in either input may consider the pilot.",
+            rationale: [{
+              claim: "Qloo returned a candidate from the joint-interest request.",
+              evidenceReferences: ["qloo-2-1"],
+            }],
+          },
+          culturalInsights: [{
+            insight: "A candidate appeared in the joint-interest results.",
+            evidenceReferences: ["qloo-2-1"],
+          }],
+          campaignConcept: {
+            name: "Culture in Common",
+            narrative: "A participatory pop-up concept for audience testing.",
+            creativeDirection: "Invite local contributors to shape an opt-in pilot.",
+          },
+          activationChannels: ["Small opt-in event"],
+          partnershipCategories: ["Local cultural contributors"],
+          executionTimeline: [{
+            phase: "Validate",
+            tasks: ["Test the concept."],
+            deliverables: ["Document feedback."],
+          }, {
+            phase: "Pilot",
+            tasks: ["Confirm permissions."],
+            deliverables: ["Record measures."],
+          }],
+          successMetrics: [{
+            metric: "Participant-reported relevance",
+            rationale: "Tests stated interest without forecasting attendance.",
+            measurementMethod: "Use a post-experience participant survey.",
+          }],
+          risksAndAssumptions: [{
+            category: "risk",
+            statement: "The concept may not resonate.",
+            mitigation: "Test before producing the activation.",
+          }],
+          validationExperiments: [{
+            experiment: "Opt-in concept test",
+            method: "Show a neutral concept and ask for feedback.",
+            decisionSignal: "Participant-reported relevance.",
+          }],
+        },
       }),
     },
   ];
@@ -57,7 +99,7 @@ test("adapts function calls, submits their outputs, and returns structured outpu
   }]);
   assert.equal(firstDecision.outputText, null);
   assert.equal(requests[0]?.model, "test-model");
-  assert.equal(requests[0]?.max_output_tokens, 1_200);
+  assert.equal(requests[0]?.max_output_tokens, 3_500);
   assert.equal(requests[0]?.previous_response_id, undefined);
 
   const finalDecision = await model({
@@ -74,11 +116,7 @@ test("adapts function calls, submits their outputs, and returns structured outpu
   }]);
   assert.equal(finalDecision.responseId, "response_with_final_plan");
   assert.deepEqual(finalDecision.toolCalls, []);
-  assert.deepEqual(JSON.parse(finalDecision.outputText ?? ""), {
-    evidenceReferences: ["qloo-1-1"],
-    hypotheses: ["A shared event may be worth testing."],
-    assumptions: ["The audience should be validated."],
-    recommendations: ["Start with an opt-in pilot."],
-  });
+  assert.equal(JSON.parse(finalDecision.outputText ?? "").strategy.executiveSummary,
+    "Test a small activation as a hypothesis.");
   assert.equal(responses.length, 0);
 });

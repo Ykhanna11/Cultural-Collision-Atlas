@@ -37,6 +37,8 @@ test("saved plan details separate persisted evidence and planning content", () =
       assumptions: ["The audience fit is unvalidated."],
       budgetRange: "$5k–$10k",
       budgetStatus: "User-supplied planning input only.",
+      strategySource: null,
+      userProvidedAssumptions: [],
     },
   );
 });
@@ -52,6 +54,8 @@ test("older or incomplete saved plans return empty details without throwing", ()
       assumptions: [],
       budgetRange: null,
       budgetStatus: null,
+      strategySource: null,
+      userProvidedAssumptions: [],
     },
   );
   assert.deepEqual(getSavedPlanDetails(null), {
@@ -62,5 +66,7 @@ test("older or incomplete saved plans return empty details without throwing", ()
     assumptions: [],
     budgetRange: null,
     budgetStatus: null,
+    strategySource: null,
+    userProvidedAssumptions: [],
   });
 });

@@ -18,6 +18,8 @@ export interface SavedPlanDetails {
   assumptions: string[];
   budgetRange: string | null;
   budgetStatus: string | null;
+  strategySource: "ai_generated" | "deterministic_fallback" | null;
+  userProvidedAssumptions: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,5 +80,16 @@ export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
       nonEmptyString(planningEstimates.budgetRange) ??
       nonEmptyString(record.budgetRange),
     budgetStatus: nonEmptyString(planningEstimates.status),
+    strategySource:
+      record.strategySource === "ai_generated" ||
+      record.strategySource === "deterministic_fallback"
+        ? record.strategySource
+        : null,
+    userProvidedAssumptions: Array.isArray(record.userProvidedAssumptions)
+      ? record.userProvidedAssumptions.flatMap((assumption) => {
+          const value = nonEmptyString(assumption);
+          return value ? [value] : [];
+        })
+      : [],
   };
 }

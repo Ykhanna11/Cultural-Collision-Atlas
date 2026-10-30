@@ -8,7 +8,8 @@ import {
   requestRecommendations,
   type QlooRecommendationType,
 } from "../qloo/insights";
-import { isRecord } from "../qloo/client";
+import { isQlooConfigured, isRecord } from "../qloo/client";
+import { createActivationPlanDraft } from "../activation-plan";
 
 export const MAX_AGENT_ROUNDS = 3;
 export const MAX_QLOO_REQUESTS = 4;
@@ -39,14 +40,182 @@ const insightArgumentsSchema = z
   })
   .strict();
 
-const finalResponseSchema = z
-  .object({
-    evidenceReferences: z.array(z.string().min(1)).min(1).max(20),
-    hypotheses: z.array(z.string().trim().min(1).max(500)).max(8),
-    assumptions: z.array(z.string().trim().min(1).max(500)).max(8),
-    recommendations: z.array(z.string().trim().min(1).max(500)).max(8),
-  })
-  .strict();
+const strategyTextSchema = z.string().trim().min(1).max(700);
+const evidenceReferencesSchema = z.array(z.string().min(1).max(32)).max(20);
+
+const rationaleSchema = z.object({
+  claim: strategyTextSchema,
+  evidenceReferences: evidenceReferencesSchema,
+}).strict();
+
+const culturalInsightSchema = z.object({
+  insight: strategyTextSchema,
+  evidenceReferences: evidenceReferencesSchema,
+}).strict();
+
+const activationStrategySchema = z.object({
+  executiveSummary: strategyTextSchema,
+  opportunity: strategyTextSchema,
+  targetAudience: z.object({
+    hypothesis: strategyTextSchema,
+    rationale: z.array(rationaleSchema).max(8),
+  }).strict(),
+  culturalInsights: z.array(culturalInsightSchema).max(8),
+  campaignConcept: z.object({
+    name: strategyTextSchema,
+    narrative: strategyTextSchema,
+    creativeDirection: strategyTextSchema,
+  }).strict(),
+  activationChannels: z.array(strategyTextSchema).min(1).max(8),
+  partnershipCategories: z.array(strategyTextSchema).min(1).max(8),
+  executionTimeline: z.array(z.object({
+    phase: strategyTextSchema,
+    tasks: z.array(strategyTextSchema).min(1).max(6),
+    deliverables: z.array(strategyTextSchema).min(1).max(6),
+  }).strict()).min(2).max(8),
+  successMetrics: z.array(z.object({
+    metric: strategyTextSchema,
+    rationale: strategyTextSchema,
+    measurementMethod: strategyTextSchema,
+  }).strict()).min(1).max(8),
+  risksAndAssumptions: z.array(z.object({
+    category: z.enum(["risk", "model_assumption"]),
+    statement: strategyTextSchema,
+    mitigation: strategyTextSchema,
+  }).strict()).min(1).max(8),
+  validationExperiments: z.array(z.object({
+    experiment: strategyTextSchema,
+    method: strategyTextSchema,
+    decisionSignal: strategyTextSchema,
+  }).strict()).min(1).max(6),
+}).strict();
+
+const aiActivationStrategySchema = activationStrategySchema.extend({
+  targetAudience: activationStrategySchema.shape.targetAudience.extend({
+    rationale: z.array(rationaleSchema.extend({
+      evidenceReferences: z.array(z.string().min(1).max(32)).min(1).max(20),
+    })).min(1).max(8),
+  }),
+  culturalInsights: z.array(culturalInsightSchema.extend({
+    evidenceReferences: z.array(z.string().min(1).max(32)).min(1).max(20),
+  })).min(1).max(8),
+});
+
+export type ActivationStrategy = z.infer<typeof activationStrategySchema>;
+
+const finalResponseSchema = z.object({
+  strategy: aiActivationStrategySchema,
+}).strict();
+
+const FALLBACK_CAVEAT =
+  "Deterministic planning fallback; this is not AI-generated. Cultural claims are not inferred without fresh Qloo evidence. Validate the strategy with the intended audience before acting.";
+
+export type ActivationPlannerFallbackReason =
+  | "credentials_unavailable"
+  | "insufficient_evidence"
+  | "invalid_structured_output"
+  | "model_or_provider_failure";
+
+function userProvidedAssumptions(input: AgentInput): string[] {
+  return [
+    `User-selected interests: ${input.interestA} and ${input.interestB}; their entity IDs were supplied with the request.`,
+    `User-selected discovery bridge: ${input.bridgeName} (${input.bridgeId}); its suitability remains unvalidated.`,
+    `User-provided city: ${input.city}.`,
+    `User-provided activation type: ${input.activationType}.`,
+    `User-provided planning budget range: ${input.budgetRange}; this is not a quote or cost estimate.`,
+    `User-provided objective: ${input.objective}.`,
+    input.audienceDescription?.trim()
+      ? `User-provided audience context: ${input.audienceDescription.trim()}; it has not been independently validated.`
+      : "No audience context was provided; the target audience remains unvalidated.",
+  ];
+}
+
+export function createDeterministicActivationPlan(
+  input: AgentInput,
+  fallbackReason: ActivationPlannerFallbackReason,
+) {
+  const draft = createActivationPlanDraft(input);
+  const strategy = activationStrategySchema.parse({
+    executiveSummary: `Deterministic fallback: ${draft.concept}. Validate this concept before committing resources.`,
+    opportunity: draft.rationale,
+    targetAudience: {
+      hypothesis: draft.targetAudienceHypothesis,
+      rationale: [],
+    },
+    culturalInsights: [],
+    campaignConcept: {
+      name: input.bridgeName,
+      narrative: draft.concept,
+      creativeDirection: draft.recommendedExperience,
+    },
+    activationChannels: [
+      `Pilot the selected ${input.activationType.replaceAll("_", " ")} format with opt-in participation.`,
+      "Select additional channels only after audience validation.",
+    ],
+    partnershipCategories: [
+      "Local cultural contributors",
+      "Venue host",
+      "Production and accessibility support",
+    ],
+    executionTimeline: draft.executionTimeline.map((item) => ({
+      phase: item.phase,
+      tasks: [item.task],
+      deliverables: [item.task],
+    })),
+    successMetrics: draft.successMetrics.map((metric) => ({
+      metric,
+      rationale: "Proposed measure only; no result or target is forecast.",
+      measurementMethod: `Agree on a collection method for ${metric.toLowerCase()} before the pilot.`,
+    })),
+    risksAndAssumptions: draft.risksAndMitigations.map(({ risk, mitigation }) => ({
+      category: "risk",
+      statement: risk,
+      mitigation,
+    })),
+    validationExperiments: [{
+      experiment: "Opt-in audience concept test",
+      method: draft.proposedAudienceInterestTest,
+      decisionSignal: "Participant-reported relevance; not a forecast of attendance or campaign performance.",
+    }],
+  });
+
+  return {
+    source: "deterministic_fallback" as const,
+    fallbackReason,
+    caveat: FALLBACK_CAVEAT,
+    strategy,
+    userProvidedAssumptions: userProvidedAssumptions(input),
+    evidence: [],
+  };
+}
+
+function validateStrategyEvidence(
+  strategy: z.infer<typeof aiActivationStrategySchema>,
+  evidence: AgentEvidence[],
+): void {
+  const insightReferences = new Set(
+    evidence
+      .filter(({ kind }) => kind === "insights")
+      .map(({ referenceId }) => referenceId),
+  );
+  if (!insightReferences.size) {
+    throw new ActivationPlannerError(
+      "insufficient_evidence",
+      "Qloo returned no usable Insights evidence for the strategy.",
+    );
+  }
+
+  const references = [
+    ...strategy.targetAudience.rationale.flatMap(({ evidenceReferences: refs }) => refs),
+    ...strategy.culturalInsights.flatMap(({ evidenceReferences: refs }) => refs),
+  ];
+  if (references.some((reference) => !insightReferences.has(reference))) {
+    throw new ActivationPlannerError(
+      "invalid_model_output",
+      "The strategy cited evidence that was not returned by Qloo Insights in this request.",
+    );
+  }
+}
 
 const toolEvidenceSchema = z
   .array(
@@ -285,21 +454,16 @@ export async function runActivationPlanner(
       if (!parsed.success) {
         throw new ActivationPlannerError(
           "invalid_model_output",
-          "The model response did not match the activation plan schema.",
+          "The model response did not match the activation strategy schema.",
         );
       }
-      const knownReferences = new Set(evidence.map(({ referenceId }) => referenceId));
-      if (parsed.data.evidenceReferences.some((id) => !knownReferences.has(id))) {
-        throw new ActivationPlannerError(
-          "invalid_model_output",
-          "The model cited evidence that was not returned by Qloo.",
-        );
-      }
+      validateStrategyEvidence(parsed.data.strategy, evidence);
       return {
-        source: "openai_qloo_agent" as const,
+        source: "ai_generated" as const,
         caveat:
-          "Qloo results are aggregate recommendation evidence; they do not establish that the same individuals share both interests or predict activation outcomes. All planning suggestions are model-generated and require human validation.",
-        ...parsed.data,
+          "Qloo results are aggregate recommendation evidence; they do not establish that the same individuals share both interests or predict activation outcomes. Strategic content is AI-generated, not validated market research. Confirm venues, partners, costs, permissions, and availability independently.",
+        strategy: parsed.data.strategy,
+        userProvidedAssumptions: userProvidedAssumptions(input),
         evidence: toolEvidenceSchema.parse(evidence),
       };
     }
@@ -379,7 +543,10 @@ export async function runActivationPlanner(
           result = makeToolEvidence(
             qlooRequests,
             "insights",
-            insightEntities(payload),
+            insightEntities(payload).map((item) => ({
+              ...item,
+              details: { ...item.details, scope: args.scope },
+            })),
             20 - evidence.length,
           );
         } catch (error) {
@@ -448,37 +615,198 @@ export const activationPlannerToolSchemas = {
 export const activationPlannerFinalSchema = {
   type: "object",
   properties: {
-    evidenceReferences: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 1,
-      maxItems: 20,
-    },
-    hypotheses: {
-      type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 500 },
-    },
-    assumptions: {
-      type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 500 },
-    },
-    recommendations: {
-      type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 500 },
+    strategy: {
+      type: "object",
+      properties: {
+        executiveSummary: { type: "string", minLength: 1, maxLength: 700 },
+        opportunity: { type: "string", minLength: 1, maxLength: 700 },
+        targetAudience: {
+          type: "object",
+          properties: {
+            hypothesis: { type: "string", minLength: 1, maxLength: 700 },
+            rationale: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: {
+                type: "object",
+                properties: {
+                  claim: { type: "string", minLength: 1, maxLength: 700 },
+                  evidenceReferences: {
+                    type: "array",
+                    minItems: 1,
+                    maxItems: 20,
+                    items: { type: "string", minLength: 1, maxLength: 32 },
+                  },
+                },
+                required: ["claim", "evidenceReferences"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["hypothesis", "rationale"],
+          additionalProperties: false,
+        },
+        culturalInsights: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              insight: { type: "string", minLength: 1, maxLength: 700 },
+              evidenceReferences: {
+                type: "array",
+                minItems: 1,
+                maxItems: 20,
+                items: { type: "string", minLength: 1, maxLength: 32 },
+              },
+            },
+            required: ["insight", "evidenceReferences"],
+            additionalProperties: false,
+          },
+        },
+        campaignConcept: {
+          type: "object",
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 700 },
+            narrative: { type: "string", minLength: 1, maxLength: 700 },
+            creativeDirection: { type: "string", minLength: 1, maxLength: 700 },
+          },
+          required: ["name", "narrative", "creativeDirection"],
+          additionalProperties: false,
+        },
+        activationChannels: {
+          type: "array", minItems: 1, maxItems: 8,
+          items: { type: "string", minLength: 1, maxLength: 700 },
+        },
+        partnershipCategories: {
+          type: "array", minItems: 1, maxItems: 8,
+          items: { type: "string", minLength: 1, maxLength: 700 },
+        },
+        executionTimeline: {
+          type: "array", minItems: 2, maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              phase: { type: "string", minLength: 1, maxLength: 700 },
+              tasks: {
+                type: "array", minItems: 1, maxItems: 6,
+                items: { type: "string", minLength: 1, maxLength: 700 },
+              },
+              deliverables: {
+                type: "array", minItems: 1, maxItems: 6,
+                items: { type: "string", minLength: 1, maxLength: 700 },
+              },
+            },
+            required: ["phase", "tasks", "deliverables"],
+            additionalProperties: false,
+          },
+        },
+        successMetrics: {
+          type: "array", minItems: 1, maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              metric: { type: "string", minLength: 1, maxLength: 700 },
+              rationale: { type: "string", minLength: 1, maxLength: 700 },
+              measurementMethod: { type: "string", minLength: 1, maxLength: 700 },
+            },
+            required: ["metric", "rationale", "measurementMethod"],
+            additionalProperties: false,
+          },
+        },
+        risksAndAssumptions: {
+          type: "array", minItems: 1, maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              category: { type: "string", enum: ["risk", "model_assumption"] },
+              statement: { type: "string", minLength: 1, maxLength: 700 },
+              mitigation: { type: "string", minLength: 1, maxLength: 700 },
+            },
+            required: ["category", "statement", "mitigation"],
+            additionalProperties: false,
+          },
+        },
+        validationExperiments: {
+          type: "array", minItems: 1, maxItems: 6,
+          items: {
+            type: "object",
+            properties: {
+              experiment: { type: "string", minLength: 1, maxLength: 700 },
+              method: { type: "string", minLength: 1, maxLength: 700 },
+              decisionSignal: { type: "string", minLength: 1, maxLength: 700 },
+            },
+            required: ["experiment", "method", "decisionSignal"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: [
+        "executiveSummary", "opportunity", "targetAudience", "culturalInsights",
+        "campaignConcept", "activationChannels", "partnershipCategories",
+        "executionTimeline", "successMetrics", "risksAndAssumptions",
+        "validationExperiments",
+      ],
+      additionalProperties: false,
     },
   },
-  required: ["evidenceReferences", "hypotheses", "assumptions", "recommendations"],
+  required: ["strategy"],
   additionalProperties: false,
 } as const;
 
-export async function runLiveActivationPlanner(input: AgentInput) {
-  const { createOpenAIPlannerModel } = await import("./openai-planner-model");
-  return runActivationPlanner(input, {
-    decide: createOpenAIPlannerModel(),
-    searchEntities: searchQlooEntities,
-    getInsights: requestRecommendations,
-  });
+function fallbackReasonFor(error: unknown): ActivationPlannerFallbackReason {
+  if (
+    error instanceof ActivationPlannerError &&
+    error.reason === "insufficient_evidence"
+  ) {
+    return "insufficient_evidence";
+  }
+  if (
+    error instanceof ActivationPlannerError &&
+    (error.reason === "invalid_model_output" || error.reason === "invalid_tool_call")
+  ) {
+    return "invalid_structured_output";
+  }
+  return "model_or_provider_failure";
+}
+
+export async function runActivationPlannerWithFallback(
+  input: AgentInput,
+  dependencies: AgentDependencies,
+) {
+  try {
+    return await runActivationPlanner(input, dependencies);
+  } catch (error) {
+    return createDeterministicActivationPlan(input, fallbackReasonFor(error));
+  }
+}
+
+export async function runLiveActivationPlanner(
+  input: AgentInput,
+  injectedDependencies?: AgentDependencies,
+) {
+  if (
+    !process.env.OPENAI_API_KEY?.trim() ||
+    !process.env.OPENAI_MODEL?.trim() ||
+    !isQlooConfigured()
+  ) {
+    return createDeterministicActivationPlan(input, "credentials_unavailable");
+  }
+
+  if (injectedDependencies) {
+    return runActivationPlannerWithFallback(input, injectedDependencies);
+  }
+
+  try {
+    const { createOpenAIPlannerModel } = await import("./openai-planner-model");
+    return await runActivationPlannerWithFallback(input, {
+      decide: createOpenAIPlannerModel(),
+      searchEntities: searchQlooEntities,
+      getInsights: requestRecommendations,
+    });
+  } catch (error) {
+    return createDeterministicActivationPlan(input, fallbackReasonFor(error));
+  }
 }

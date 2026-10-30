@@ -28,7 +28,7 @@ export const GetAtlasOverviewResponse = zod.object({
   "configured": zod.boolean(),
   "verified": zod.boolean(),
   "message": zod.string(),
-  "checkedAt": zod.coerce.date().nullish()
+  "checkedAt": zod.coerce.date().nullish().describe('Timestamp of the most recent successful authenticated Qloo request; retained as historical context after later failures.')
 }),
   "venueProviderConfigured": zod.boolean()
 })
@@ -42,7 +42,7 @@ export const GetQlooStatusResponse = zod.object({
   "configured": zod.boolean(),
   "verified": zod.boolean(),
   "message": zod.string(),
-  "checkedAt": zod.coerce.date().nullish()
+  "checkedAt": zod.coerce.date().nullish().describe('Timestamp of the most recent successful authenticated Qloo request; retained as historical context after later failures.')
 })
 
 
@@ -62,7 +62,7 @@ export const TestQlooConnectionResponse = zod.object({
   "configured": zod.boolean(),
   "verified": zod.boolean(),
   "message": zod.string(),
-  "checkedAt": zod.coerce.date().nullish()
+  "checkedAt": zod.coerce.date().nullish().describe('Timestamp of the most recent successful authenticated Qloo request; retained as historical context after later failures.')
 })
 
 
@@ -368,13 +368,126 @@ export const GenerateActivationPlanWithAgentBody = zod.object({
   "bridgeName": zod.string().min(1).max(generateActivationPlanWithAgentBodyBridgeNameMax)
 })
 
+export const generateActivationPlanWithAgentResponseStrategyExecutiveSummaryMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyOpportunityMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyTargetAudienceHypothesisMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemClaimMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemEvidenceReferencesItemMax = 32;
+
+export const generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemEvidenceReferencesMax = 20;
+
+export const generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemInsightMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemEvidenceReferencesItemMax = 32;
+
+export const generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemEvidenceReferencesMax = 20;
+
+export const generateActivationPlanWithAgentResponseStrategyCulturalInsightsMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyCampaignConceptNameMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyCampaignConceptNarrativeMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyCampaignConceptCreativeDirectionMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyActivationChannelsItemMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyActivationChannelsMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyPartnershipCategoriesItemMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyPartnershipCategoriesMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemPhaseMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemTasksItemMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemTasksMax = 6;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemDeliverablesItemMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemDeliverablesMax = 6;
+
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineMin = 2;
+export const generateActivationPlanWithAgentResponseStrategyExecutionTimelineMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategySuccessMetricsItemMetricMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategySuccessMetricsItemRationaleMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategySuccessMetricsItemMeasurementMethodMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategySuccessMetricsMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsItemStatementMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsItemMitigationMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsMax = 8;
+
+export const generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemExperimentMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemMethodMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemDecisionSignalMax = 700;
+
+export const generateActivationPlanWithAgentResponseStrategyValidationExperimentsMax = 6;
+
+
+
 export const GenerateActivationPlanWithAgentResponse = zod.object({
-  "source": zod.enum(['openai_qloo_agent']),
+  "source": zod.enum(['ai_generated', 'deterministic_fallback']),
+  "fallbackReason": zod.enum(['credentials_unavailable', 'insufficient_evidence', 'invalid_structured_output', 'model_or_provider_failure']).optional(),
   "caveat": zod.string(),
-  "evidenceReferences": zod.array(zod.string()),
-  "hypotheses": zod.array(zod.string()),
-  "assumptions": zod.array(zod.string()),
-  "recommendations": zod.array(zod.string()),
+  "strategy": zod.object({
+  "executiveSummary": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyExecutiveSummaryMax),
+  "opportunity": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyOpportunityMax),
+  "targetAudience": zod.object({
+  "hypothesis": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyTargetAudienceHypothesisMax),
+  "rationale": zod.array(zod.object({
+  "claim": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemClaimMax),
+  "evidenceReferences": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemEvidenceReferencesItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleItemEvidenceReferencesMax)
+})).max(generateActivationPlanWithAgentResponseStrategyTargetAudienceRationaleMax)
+}),
+  "culturalInsights": zod.array(zod.object({
+  "insight": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemInsightMax),
+  "evidenceReferences": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemEvidenceReferencesItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyCulturalInsightsItemEvidenceReferencesMax)
+})).max(generateActivationPlanWithAgentResponseStrategyCulturalInsightsMax),
+  "campaignConcept": zod.object({
+  "name": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyCampaignConceptNameMax),
+  "narrative": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyCampaignConceptNarrativeMax),
+  "creativeDirection": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyCampaignConceptCreativeDirectionMax)
+}),
+  "activationChannels": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyActivationChannelsItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyActivationChannelsMax),
+  "partnershipCategories": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyPartnershipCategoriesItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyPartnershipCategoriesMax),
+  "executionTimeline": zod.array(zod.object({
+  "phase": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemPhaseMax),
+  "tasks": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemTasksItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemTasksMax),
+  "deliverables": zod.array(zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemDeliverablesItemMax)).min(1).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineItemDeliverablesMax)
+})).min(generateActivationPlanWithAgentResponseStrategyExecutionTimelineMin).max(generateActivationPlanWithAgentResponseStrategyExecutionTimelineMax),
+  "successMetrics": zod.array(zod.object({
+  "metric": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategySuccessMetricsItemMetricMax),
+  "rationale": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategySuccessMetricsItemRationaleMax),
+  "measurementMethod": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategySuccessMetricsItemMeasurementMethodMax)
+})).min(1).max(generateActivationPlanWithAgentResponseStrategySuccessMetricsMax),
+  "risksAndAssumptions": zod.array(zod.object({
+  "category": zod.enum(['risk', 'model_assumption']),
+  "statement": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsItemStatementMax),
+  "mitigation": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsItemMitigationMax)
+})).min(1).max(generateActivationPlanWithAgentResponseStrategyRisksAndAssumptionsMax),
+  "validationExperiments": zod.array(zod.object({
+  "experiment": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemExperimentMax),
+  "method": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemMethodMax),
+  "decisionSignal": zod.string().min(1).max(generateActivationPlanWithAgentResponseStrategyValidationExperimentsItemDecisionSignalMax)
+})).min(1).max(generateActivationPlanWithAgentResponseStrategyValidationExperimentsMax)
+}),
+  "userProvidedAssumptions": zod.array(zod.string()),
   "evidence": zod.array(zod.object({
   "referenceId": zod.string(),
   "source": zod.enum(['qloo_api']),

@@ -12,6 +12,9 @@ export interface QlooStatus {
   configured: boolean;
   verified: boolean;
   message: string;
-  /** @nullable */
+  /**
+     * Timestamp of the most recent successful authenticated Qloo request; retained as historical context after later failures.
+     * @nullable
+     */
   checkedAt?: Date | null;
 }

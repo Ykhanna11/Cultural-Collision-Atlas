@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { GenerateActivationPlanWithAgentResponse } from "@workspace/api-zod";
 import {
   ActivationPlannerError,
   MAX_AGENT_ROUNDS,
   MAX_QLOO_REQUESTS,
   runActivationPlanner,
+  runActivationPlannerWithFallback,
+  runLiveActivationPlanner,
   type AgentDecision,
   type AgentDependencies,
   type AgentInput,
@@ -25,10 +28,52 @@ const input: AgentInput = {
 
 const finalOutput = (referenceId: string) =>
   JSON.stringify({
-    evidenceReferences: [referenceId],
-    hypotheses: ["A shared experience may be worth testing."],
-    assumptions: ["The audience should be validated before launch."],
-    recommendations: ["Run a small opt-in concept test."],
+    strategy: {
+      executiveSummary: "Test a small cultural activation as a hypothesis.",
+      opportunity: "Explore a bridge returned by aggregate Qloo Insights.",
+      targetAudience: {
+        hypothesis: "People interested in either input may consider the pilot.",
+        rationale: [{
+          claim: "Qloo returned a candidate from the joint-interest request.",
+          evidenceReferences: [referenceId],
+        }],
+      },
+      culturalInsights: [{
+        insight: "The candidate appeared in the joint-interest recommendation results.",
+        evidenceReferences: [referenceId],
+      }],
+      campaignConcept: {
+        name: "Culture in Common",
+        narrative: "A participatory pop-up concept for audience testing.",
+        creativeDirection: "Invite local contributors to shape an opt-in pilot.",
+      },
+      activationChannels: ["Small opt-in event"],
+      partnershipCategories: ["Local cultural contributors"],
+      executionTimeline: [{
+        phase: "Validate",
+        tasks: ["Test the concept with an opt-in sample."],
+        deliverables: ["Document participant feedback."],
+      }, {
+        phase: "Pilot",
+        tasks: ["Confirm permissions before production."],
+        deliverables: ["Record agreed success metrics."],
+      }],
+      successMetrics: [{
+        metric: "Participant-reported relevance",
+        rationale: "Tests stated interest without forecasting attendance.",
+        measurementMethod: "Use a post-experience participant survey.",
+      }],
+      risksAndAssumptions: [{
+        category: "risk",
+        statement: "The concept may not resonate with the audience.",
+        mitigation: "Test before committing to production.",
+      }],
+      validationExperiments: [{
+        experiment: "Opt-in concept test",
+        method: "Show a neutral concept and ask participants for feedback.",
+        decisionSignal: "Participant-reported relevance.",
+      }],
+    },
   });
 
 function decision(
@@ -86,18 +131,26 @@ test("selects Qloo tools from evidence needs and continues with validated tool r
             name: "search_qloo_entities",
             arguments: JSON.stringify({ query: "Jazz", types: null }),
           },
+          {
+            id: "call-insights",
+            name: "get_qloo_insights",
+            arguments: JSON.stringify({ scope: "both" }),
+          },
         ]);
       }
       assert.equal(request.previousResponseId, "response-1");
       assert.ok(Array.isArray(request.input));
       assert.match(request.input[0]?.output ?? "", /Verified entity/);
-      return decision(2, [], finalOutput("qloo-1-1"));
+      assert.match(request.input[1]?.output ?? "", /Verified insight/);
+      return decision(2, [], finalOutput("qloo-2-1"));
     }),
   );
   assert.equal(calls.length, 2);
-  assert.equal(result.source, "openai_qloo_agent");
+  assert.equal(result.source, "ai_generated");
   assert.equal(result.evidence[0]?.name, "Verified entity");
-  assert.deepEqual(result.evidenceReferences, ["qloo-1-1"]);
+  assert.equal(result.strategy.culturalInsights[0]?.evidenceReferences[0], "qloo-2-1");
+  assert.equal(result.evidence.find(({ referenceId }) => referenceId === "qloo-2-1")?.kind, "insights");
+  assert.equal(GenerateActivationPlanWithAgentResponse.safeParse(result).success, true);
 });
 
 test("rejects unknown tools and invalid arguments without dispatching Qloo", async () => {
@@ -258,6 +311,94 @@ test("stops with insufficient evidence when no Qloo tool results exist", async (
   );
 });
 
+test("does not accept entity-search evidence as cultural Insights evidence", async () => {
+  await assert.rejects(
+    runActivationPlanner(
+      input,
+      dependencies(async ({ round }) =>
+        round === 1
+          ? decision(1, [{
+              id: "call-search",
+              name: "search_qloo_entities",
+              arguments: JSON.stringify({ query: "Jazz", types: null }),
+            }])
+          : decision(2, [], finalOutput("qloo-1-1")),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof ActivationPlannerError &&
+      error.reason === "insufficient_evidence",
+  );
+});
+
+test("rejects malformed complete-strategy output", async () => {
+  await assert.rejects(
+    runActivationPlanner(
+      input,
+      dependencies(async ({ round }) =>
+        round === 1
+          ? decision(1, [{
+              id: "call-insights",
+              name: "get_qloo_insights",
+              arguments: JSON.stringify({ scope: "both" }),
+            }])
+          : decision(2, [], JSON.stringify({ strategy: { executiveSummary: "Incomplete" } })),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof ActivationPlannerError &&
+      error.reason === "invalid_model_output",
+  );
+});
+
+test("missing credentials returns a labeled deterministic fallback without model calls", async () => {
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_MODEL;
+  delete process.env.QLOO_API_KEY;
+  let modelCalls = 0;
+  const result = await runLiveActivationPlanner(input, dependencies(async () => {
+    modelCalls += 1;
+    return decision(1, []);
+  }));
+
+  assert.equal(modelCalls, 0);
+  assert.equal(result.source, "deterministic_fallback");
+  assert.equal(result.fallbackReason, "credentials_unavailable");
+  assert.match(result.caveat, /not AI-generated/);
+  assert.deepEqual(result.evidence, []);
+});
+
+test("model failure returns a labeled deterministic fallback", async () => {
+  const result = await runActivationPlannerWithFallback(
+    input,
+    dependencies(async () => {
+      throw new Error("mock model failure");
+    }),
+  );
+
+  assert.equal(result.source, "deterministic_fallback");
+  assert.equal(result.fallbackReason, "model_or_provider_failure");
+  assert.match(result.caveat, /not AI-generated/);
+});
+
+test("invalid structured output is returned as an explicit fallback", async () => {
+  const result = await runActivationPlannerWithFallback(
+    input,
+    dependencies(async ({ round }) =>
+      round === 1
+        ? decision(1, [{
+            id: "call-insights",
+            name: "get_qloo_insights",
+            arguments: JSON.stringify({ scope: "both" }),
+          }])
+        : decision(2, [], JSON.stringify({ strategy: { unexpected: true } })),
+    ),
+  );
+
+  assert.equal(result.source, "deterministic_fallback");
+  assert.equal(result.fallbackReason, "invalid_structured_output");
+});
+
 test("stops on provider failures and invalid evidence references", async () => {
   await assert.rejects(
     runActivationPlanner(
@@ -281,6 +422,11 @@ test("stops on provider failures and invalid evidence references", async () => {
                 id: "call-search",
                 name: "search_qloo_entities",
                 arguments: JSON.stringify({ query: "Jazz", types: null }),
+              },
+              {
+                id: "call-insights",
+                name: "get_qloo_insights",
+                arguments: JSON.stringify({ scope: "both" }),
               },
             ])
           : decision(2, [], finalOutput("qloo-99-1")),

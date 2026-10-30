@@ -11,7 +11,12 @@ import {
 } from "@workspace/api-zod";
 import { count, eq } from "drizzle-orm";
 import { activationPlansTable, db, savedDiscoveriesTable } from "@workspace/db";
-import { getQlooStatus, isQlooConfigured, qlooGet } from "../lib/qloo/client";
+import {
+  getQlooStatus,
+  isQlooConfigured,
+  QlooApiError,
+  qlooGet,
+} from "../lib/qloo/client";
 import { searchQlooEntities } from "../lib/qloo/entities";
 import { requestQlooHeatmap } from "../lib/qloo/heatmap";
 import { getVenueSourceStatus } from "../lib/venue-source";
@@ -125,9 +130,20 @@ router.post(
         typeof error === "object" && error !== null && "status" in error
           ? Number(error.status)
           : 502;
+      const message =
+        status === 401 || status === 403
+          ? "Qloo rejected the server-side credential."
+          : status === 429
+            ? "Qloo rate limit reached. Try again later."
+            : status === 503
+              ? "Qloo is not configured for entity search."
+              : error instanceof QlooApiError
+                ? error.message
+                : error instanceof Error
+                  ? `Qloo returned unusable entity-search data: ${error.message}`
+                  : "Qloo entity search failed unexpectedly.";
       res.status(status >= 400 && status < 600 ? status : 502).json({
-        error:
-          "Qloo entity search failed. No substitute or sample results were returned.",
+        error: `${message} No substitute or sample results were returned.`,
       });
     }
   },
