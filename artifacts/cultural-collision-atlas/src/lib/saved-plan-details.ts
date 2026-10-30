@@ -1,3 +1,8 @@
+import {
+  isGeographicAnalysisSnapshot,
+  type GeographicAnalysisSnapshot,
+} from "./product-workflow";
+
 export interface SavedPlanSection {
   title: string;
   content: string;
@@ -22,6 +27,7 @@ export interface SavedPlanDetails {
   budgetStatus: string | null;
   strategySource: "ai_generated" | "deterministic_fallback" | null;
   userProvidedAssumptions: string[];
+  geographicAnalysis?: GeographicAnalysisSnapshot;
 }
 
 export interface SavedPlanVenue {
@@ -192,6 +198,9 @@ export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
     ? record.selectedVenues.map(parseSavedVenue).filter((venue): venue is SavedPlanVenue => Boolean(venue))
     : [parseSavedVenue(record.selectedVenue)].filter((venue): venue is SavedPlanVenue => Boolean(venue));
   const selectedVenue = selectedVenues[0] ?? null;
+  const geographicAnalysis = isGeographicAnalysisSnapshot(record.geographicAnalysis)
+    ? record.geographicAnalysis
+    : undefined;
 
   return {
     sections,
@@ -216,5 +225,6 @@ export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
           return value ? [value] : [];
         })
       : [],
+      ...(geographicAnalysis && { geographicAnalysis }),
   };
 }

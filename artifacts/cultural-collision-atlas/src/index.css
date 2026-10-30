@@ -124,9 +124,26 @@ button { cursor: pointer; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 
+.venue-map-shell { position: relative; }
+.venue-map-canvas {
+  width: 100%;
+  height: 420px;
+  overflow: hidden;
+  border-radius: .75rem;
+  background: #0b101b;
+}
+@media (min-width: 1024px) {
+  .venue-map-canvas { height: 520px; }
+}
 .venue-map-marker {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
   border: 0;
   background: transparent;
+  cursor: pointer;
 }
 .venue-map-marker span {
   display: block;
@@ -139,8 +156,59 @@ button { cursor: pointer; }
   transform: rotate(-45deg);
   transition: transform .18s ease, background .18s ease;
 }
+.venue-map-marker:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .venue-map-marker span.venue-map-marker-selected {
   background: #a995f1;
   box-shadow: 0 0 0 5px rgba(169, 149, 241, .16);
   transform: rotate(-45deg) scale(1.18);
 }
+.venue-map-shell .maplibregl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.13);
+  border-radius: .5rem;
+  background: rgba(11,16,27,.94);
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.venue-map-shell .maplibregl-ctrl-group button { background-color: transparent; }
+.venue-map-shell .maplibregl-ctrl-group button:hover { background-color: rgba(255,255,255,.08); }
+.venue-map-shell .maplibregl-ctrl-group button span { filter: invert(.86); }
+.venue-map-shell .maplibregl-ctrl-attrib {
+  border-radius: .25rem 0 0 0;
+  background: rgba(11,16,27,.88);
+  color: #b7c1d1;
+  font-size: 10px;
+}
+.venue-map-shell .maplibregl-ctrl-attrib a { color: #c9d5e6; }
+.venue-map-shell .maplibregl-popup-content {
+  display: grid;
+  gap: .3rem;
+  max-width: 280px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: .5rem;
+  background: #111827;
+  color: #c9d2e0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.venue-map-shell .maplibregl-popup-content strong { color: #f0f3f8; font-size: 12px; }
+.venue-map-shell .maplibregl-popup-close-button { color: #c9d2e0; }
+.venue-map-shell .maplibregl-popup-tip { border-top-color: #111827; border-bottom-color: #111827; }
+.venue-map-fallback {
+  position: absolute;
+  z-index: 3;
+  top: .75rem;
+  left: .75rem;
+  display: grid;
+  max-width: min(360px, calc(100% - 1.5rem));
+  gap: .3rem;
+  padding: .65rem .8rem;
+  border: 1px solid rgba(230,185,109,.3);
+  border-radius: .5rem;
+  background: rgba(11,16,27,.94);
+  color: #d3d9e4;
+  font-size: 10px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.venue-map-fallback strong { color: #f1d29a; }
+.venue-map-fallback-attribution { color: #8490a4; font-size: 8px; }

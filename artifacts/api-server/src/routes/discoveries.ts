@@ -19,6 +19,7 @@ import {
 } from "../lib/qloo/insights";
 import { isQlooConfigured } from "../lib/qloo/client";
 import { loadTasteAnalysis } from "../lib/qloo/taste-analysis";
+import { cacheDiscoveryAnalysis } from "../lib/cultural-intelligence/analysis-cache";
 import {
   isQlooEntityId,
   isVerifiedQlooCityLocality,
@@ -132,11 +133,31 @@ router.post(
         resultsB,
         jointResults,
       });
+      const createdAt = new Date().toISOString();
+      const analysisReference = cacheDiscoveryAnalysis({
+        input: {
+          interestA: input.interestA,
+          interestAId: input.interestAId,
+          interestB: input.interestB,
+          interestBId: input.interestBId,
+          city: input.city,
+          cityEntityId: input.cityEntityId,
+          recommendationType,
+        },
+        resultsA,
+        resultsB,
+        jointResults,
+        tasteAnalysisA: tasteResults[0]?.payload ?? null,
+        tasteAnalysisB: tasteResults[1]?.payload ?? null,
+        candidates: ranked,
+        createdAt,
+      });
       const hasTwoSidedCandidates = ranked.some(
         (candidate) => candidate.confidence === "high",
       );
       res.json(
         DiscoverCulturalBridgesResponse.parse({
+          analysisReference,
           source: "qloo_api",
           candidates: ranked,
           caveat:
@@ -150,7 +171,7 @@ router.post(
             (hasTwoSidedCandidates
               ? ""
               : " No returned candidate has explicit positive per-result attribution from both selected entities; one-sided or unavailable-attribution results should be treated as exploratory, not substantiated two-interest bridges."),
-          generatedAt: new Date(),
+          generatedAt: createdAt,
         }),
       );
     } catch (error) {

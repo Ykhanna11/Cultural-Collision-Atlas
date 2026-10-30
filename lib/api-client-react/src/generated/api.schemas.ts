@@ -477,6 +477,7 @@ export const DiscoveryResponseSource = {
 } as const;
 
 export interface DiscoveryResponse {
+  analysisReference?: string;
   source: DiscoveryResponseSource;
   candidates: BridgeCandidate[];
   caveat: string;
@@ -593,12 +594,19 @@ export interface HeatmapResponse {
   points: HeatmapPoint[];
 }
 
-export interface AtlasOverview {
-  savedDiscoveries: number;
-  savedPlans: number;
-  qloo: QlooStatus;
-  venueProviderConfigured: boolean;
-}
+export type GeographicAnalysisInputCategoriesItem = typeof GeographicAnalysisInputCategoriesItem[keyof typeof GeographicAnalysisInputCategoriesItem];
+
+
+export const GeographicAnalysisInputCategoriesItem = {
+  restaurant: 'restaurant',
+  cafe: 'cafe',
+  shopping: 'shopping',
+  entertainment: 'entertainment',
+  sports: 'sports',
+  culture: 'culture',
+  museum: 'museum',
+  event_space: 'event_space',
+} as const;
 
 export interface VenueBoundingBox {
   /**
@@ -622,6 +630,68 @@ export interface VenueBoundingBox {
      */
   east: number;
 }
+
+export interface GeographicAnalysisInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  city: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  entityId: string;
+  analysisReference?: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  selectedVenueId?: string;
+  bounds: VenueBoundingBox;
+  categories?: GeographicAnalysisInputCategoriesItem[];
+  /** @maxLength 120 */
+  query?: string;
+  /**
+     * @minimum 1
+     * @maximum 50
+     */
+  limit?: number;
+}
+
+export type GeographicIntelligenceSummaryHeatmapStatus = typeof GeographicIntelligenceSummaryHeatmapStatus[keyof typeof GeographicIntelligenceSummaryHeatmapStatus];
+
+
+export const GeographicIntelligenceSummaryHeatmapStatus = {
+  returned: 'returned',
+  empty: 'empty',
+  unavailable: 'unavailable',
+} as const;
+
+export type GeographicIntelligenceSummaryHeatmapSource = typeof GeographicIntelligenceSummaryHeatmapSource[keyof typeof GeographicIntelligenceSummaryHeatmapSource];
+
+
+export const GeographicIntelligenceSummaryHeatmapSource = {
+  Qloo_Insights_API: 'Qloo Insights API',
+} as const;
+
+export type GeographicIntelligenceSummaryVenuesStatus = typeof GeographicIntelligenceSummaryVenuesStatus[keyof typeof GeographicIntelligenceSummaryVenuesStatus];
+
+
+export const GeographicIntelligenceSummaryVenuesStatus = {
+  returned: 'returned',
+  empty: 'empty',
+  unavailable: 'unavailable',
+} as const;
+
+export type GeographicIntelligenceSummaryVenuesSource = typeof GeographicIntelligenceSummaryVenuesSource[keyof typeof GeographicIntelligenceSummaryVenuesSource];
+
+
+export const GeographicIntelligenceSummaryVenuesSource = {
+  Overture_Maps_Places: 'Overture Maps Places',
+  OpenStreetMap: 'OpenStreetMap',
+  mixed: 'mixed',
+} as const;
 
 export type VenueProvider = typeof VenueProvider[keyof typeof VenueProvider];
 
@@ -673,6 +743,444 @@ export interface Venue {
   sourceMetadata?: VenueSourceMetadata;
   attribution: string;
   retrievedAt: string;
+}
+
+export type GeographicIntelligenceSummaryOvertureCoverageStatus = typeof GeographicIntelligenceSummaryOvertureCoverageStatus[keyof typeof GeographicIntelligenceSummaryOvertureCoverageStatus];
+
+
+export const GeographicIntelligenceSummaryOvertureCoverageStatus = {
+  covered: 'covered',
+  partial: 'partial',
+  outside: 'outside',
+  unknown: 'unknown',
+} as const;
+
+export type GeographicIntelligenceSummaryCoverage = typeof GeographicIntelligenceSummaryCoverage[keyof typeof GeographicIntelligenceSummaryCoverage];
+
+
+export const GeographicIntelligenceSummaryCoverage = {
+  complete: 'complete',
+  partial: 'partial',
+  unavailable: 'unavailable',
+} as const;
+
+export type GeographicIntelligenceSummaryHeatmap = {
+  status: GeographicIntelligenceSummaryHeatmapStatus;
+  source: GeographicIntelligenceSummaryHeatmapSource;
+  /** @minimum 0 */
+  pointCount: number;
+  /** @minimum 0 */
+  duplicateCount: number;
+  /** @minimum 0 */
+  invalidCoordinateCount: number;
+  points: HeatmapPoint[];
+};
+
+export type GeographicIntelligenceSummaryVenuesCategoryCountsItem = {
+  category: string;
+  /** @minimum 0 */
+  count: number;
+};
+
+export type GeographicIntelligenceSummaryVenues = {
+  status: GeographicIntelligenceSummaryVenuesStatus;
+  source: GeographicIntelligenceSummaryVenuesSource;
+  /** @minimum 0 */
+  recordCount: number;
+  /** @minimum 0 */
+  duplicateCount: number;
+  /** @minimum 0 */
+  invalidCoordinateCount: number;
+  categoryCounts: GeographicIntelligenceSummaryVenuesCategoryCountsItem[];
+  records: Venue[];
+};
+
+export type GeographicIntelligenceSummaryOvertureCoverage = {
+  status: GeographicIntelligenceSummaryOvertureCoverageStatus;
+  bounds: VenueBoundingBox | null;
+};
+
+export interface GeographicIntelligenceSummary {
+  requestedBounds: VenueBoundingBox;
+  observedBounds: VenueBoundingBox | null;
+  heatmap: GeographicIntelligenceSummaryHeatmap;
+  venues: GeographicIntelligenceSummaryVenues;
+  overtureCoverage: GeographicIntelligenceSummaryOvertureCoverage;
+  coverage: GeographicIntelligenceSummaryCoverage;
+  sourceSeparation: string;
+}
+
+export type UnifiedOpportunityAnalysisVersion = typeof UnifiedOpportunityAnalysisVersion[keyof typeof UnifiedOpportunityAnalysisVersion];
+
+
+export const UnifiedOpportunityAnalysisVersion = {
+  'opportunity-analysis/1': 'opportunity-analysis/1',
+} as const;
+
+export type UnifiedOpportunityAnalysisAffinityQueryStatusesInterestA = typeof UnifiedOpportunityAnalysisAffinityQueryStatusesInterestA[keyof typeof UnifiedOpportunityAnalysisAffinityQueryStatusesInterestA];
+
+
+export const UnifiedOpportunityAnalysisAffinityQueryStatusesInterestA = {
+  complete: 'complete',
+  partial: 'partial',
+  empty: 'empty',
+  unavailable: 'unavailable',
+  invalid: 'invalid',
+} as const;
+
+export type UnifiedOpportunityAnalysisAffinityQueryStatusesInterestB = typeof UnifiedOpportunityAnalysisAffinityQueryStatusesInterestB[keyof typeof UnifiedOpportunityAnalysisAffinityQueryStatusesInterestB];
+
+
+export const UnifiedOpportunityAnalysisAffinityQueryStatusesInterestB = {
+  complete: 'complete',
+  partial: 'partial',
+  empty: 'empty',
+  unavailable: 'unavailable',
+  invalid: 'invalid',
+} as const;
+
+export type UnifiedOpportunityAnalysisAffinityQueryStatusesJoint = typeof UnifiedOpportunityAnalysisAffinityQueryStatusesJoint[keyof typeof UnifiedOpportunityAnalysisAffinityQueryStatusesJoint];
+
+
+export const UnifiedOpportunityAnalysisAffinityQueryStatusesJoint = {
+  complete: 'complete',
+  partial: 'partial',
+  empty: 'empty',
+  unavailable: 'unavailable',
+  invalid: 'invalid',
+} as const;
+
+export type AffinityScopeEvidenceQueryStatus = typeof AffinityScopeEvidenceQueryStatus[keyof typeof AffinityScopeEvidenceQueryStatus];
+
+
+export const AffinityScopeEvidenceQueryStatus = {
+  complete: 'complete',
+  partial: 'partial',
+  empty: 'empty',
+  unavailable: 'unavailable',
+  invalid: 'invalid',
+} as const;
+
+export type AffinityScopeEvidenceCandidatePresence = typeof AffinityScopeEvidenceCandidatePresence[keyof typeof AffinityScopeEvidenceCandidatePresence];
+
+
+export const AffinityScopeEvidenceCandidatePresence = {
+  returned: 'returned',
+  not_returned: 'not_returned',
+} as const;
+
+export type AffinityScopeEvidenceAffinityStatus = typeof AffinityScopeEvidenceAffinityStatus[keyof typeof AffinityScopeEvidenceAffinityStatus];
+
+
+export const AffinityScopeEvidenceAffinityStatus = {
+  returned: 'returned',
+  missing: 'missing',
+  invalid: 'invalid',
+  unavailable: 'unavailable',
+} as const;
+
+export type AffinityScopeEvidenceAffinityRankStatus = typeof AffinityScopeEvidenceAffinityRankStatus[keyof typeof AffinityScopeEvidenceAffinityRankStatus];
+
+
+export const AffinityScopeEvidenceAffinityRankStatus = {
+  returned: 'returned',
+  missing: 'missing',
+  invalid: 'invalid',
+  unavailable: 'unavailable',
+} as const;
+
+export interface AffinityScopeEvidence {
+  queryStatus: AffinityScopeEvidenceQueryStatus;
+  inputEntityIds: string[];
+  candidatePresence: AffinityScopeEvidenceCandidatePresence;
+  affinityStatus: AffinityScopeEvidenceAffinityStatus;
+  /** @nullable */
+  affinity: number | null;
+  affinityRankStatus: AffinityScopeEvidenceAffinityRankStatus;
+  /** @nullable */
+  affinityRank: number | null;
+  sourceReference: string;
+}
+
+export type UnifiedOpportunityAnalysisAffinityJointAffinityStatus = typeof UnifiedOpportunityAnalysisAffinityJointAffinityStatus[keyof typeof UnifiedOpportunityAnalysisAffinityJointAffinityStatus];
+
+
+export const UnifiedOpportunityAnalysisAffinityJointAffinityStatus = {
+  returned: 'returned',
+  missing: 'missing',
+  invalid: 'invalid',
+  unavailable: 'unavailable',
+} as const;
+
+export type UnifiedOpportunityAnalysisAffinityAttributionCoverage = typeof UnifiedOpportunityAnalysisAffinityAttributionCoverage[keyof typeof UnifiedOpportunityAnalysisAffinityAttributionCoverage];
+
+
+export const UnifiedOpportunityAnalysisAffinityAttributionCoverage = {
+  both_inputs_attributed: 'both_inputs_attributed',
+  one_input_attributed: 'one_input_attributed',
+  no_positive_attribution: 'no_positive_attribution',
+  unavailable: 'unavailable',
+  invalid: 'invalid',
+  partial: 'partial',
+} as const;
+
+export type UnifiedOpportunityAnalysisOverlapStatus = typeof UnifiedOpportunityAnalysisOverlapStatus[keyof typeof UnifiedOpportunityAnalysisOverlapStatus];
+
+
+export const UnifiedOpportunityAnalysisOverlapStatus = {
+  complete: 'complete',
+  partial: 'partial',
+  unavailable: 'unavailable',
+} as const;
+
+export type OverlapTagPairClassification = typeof OverlapTagPairClassification[keyof typeof OverlapTagPairClassification];
+
+
+export const OverlapTagPairClassification = {
+  cultural_domain: 'cultural_domain',
+  operational: 'operational',
+  unclassified: 'unclassified',
+} as const;
+
+export interface OverlapTagPair {
+  id: string;
+  interestAName: string;
+  interestBName: string;
+  classification: OverlapTagPairClassification;
+}
+
+export type OverlapTagDescriptorClassification = typeof OverlapTagDescriptorClassification[keyof typeof OverlapTagDescriptorClassification];
+
+
+export const OverlapTagDescriptorClassification = {
+  cultural_domain: 'cultural_domain',
+  operational: 'operational',
+  unclassified: 'unclassified',
+} as const;
+
+export interface OverlapTagDescriptor {
+  id: string;
+  name: string;
+  classification: OverlapTagDescriptorClassification;
+}
+
+export type UnifiedOpportunityAnalysisOverlapJaccardStatus = typeof UnifiedOpportunityAnalysisOverlapJaccardStatus[keyof typeof UnifiedOpportunityAnalysisOverlapJaccardStatus];
+
+
+export const UnifiedOpportunityAnalysisOverlapJaccardStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+/**
+ * @nullable
+ */
+export type UnifiedOpportunityAnalysisOverlapJaccardReason = typeof UnifiedOpportunityAnalysisOverlapJaccardReason[keyof typeof UnifiedOpportunityAnalysisOverlapJaccardReason] | null;
+
+
+export const UnifiedOpportunityAnalysisOverlapJaccardReason = {
+  incomplete_tag_sets: 'incomplete_tag_sets',
+  empty_union: 'empty_union',
+} as const;
+
+export type UnifiedOpportunityAnalysisOverlapCoverageInterestA = typeof UnifiedOpportunityAnalysisOverlapCoverageInterestA[keyof typeof UnifiedOpportunityAnalysisOverlapCoverageInterestA];
+
+
+export const UnifiedOpportunityAnalysisOverlapCoverageInterestA = {
+  complete: 'complete',
+  partial: 'partial',
+  unavailable: 'unavailable',
+} as const;
+
+export type UnifiedOpportunityAnalysisOverlapCoverageInterestB = typeof UnifiedOpportunityAnalysisOverlapCoverageInterestB[keyof typeof UnifiedOpportunityAnalysisOverlapCoverageInterestB];
+
+
+export const UnifiedOpportunityAnalysisOverlapCoverageInterestB = {
+  complete: 'complete',
+  partial: 'partial',
+  unavailable: 'unavailable',
+} as const;
+
+export type UnifiedOpportunityAnalysisJointAttributionStatus = typeof UnifiedOpportunityAnalysisJointAttributionStatus[keyof typeof UnifiedOpportunityAnalysisJointAttributionStatus];
+
+
+export const UnifiedOpportunityAnalysisJointAttributionStatus = {
+  attributed: 'attributed',
+  unavailable: 'unavailable',
+} as const;
+
+export type OpportunityComponentVectorMethodologyVersion = typeof OpportunityComponentVectorMethodologyVersion[keyof typeof OpportunityComponentVectorMethodologyVersion];
+
+
+export const OpportunityComponentVectorMethodologyVersion = {
+  'opportunity-components/1': 'opportunity-components/1',
+} as const;
+
+export type OpportunityComponentStatus = typeof OpportunityComponentStatus[keyof typeof OpportunityComponentStatus];
+
+
+export const OpportunityComponentStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export interface OpportunityComponent {
+  status: OpportunityComponentStatus;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  score: number | null;
+  explanation?: string;
+  reason?: string;
+  sourceReferences: string[];
+}
+
+export type OpportunityComponentVectorCompositeStatus = typeof OpportunityComponentVectorCompositeStatus[keyof typeof OpportunityComponentVectorCompositeStatus];
+
+
+export const OpportunityComponentVectorCompositeStatus = {
+  unavailable: 'unavailable',
+} as const;
+
+/**
+ * @nullable
+ */
+export type OpportunityComponentVectorCompositeScore = typeof OpportunityComponentVectorCompositeScore[keyof typeof OpportunityComponentVectorCompositeScore] | null;
+
+
+export const OpportunityComponentVectorCompositeScore = {
+} as const;
+
+export type OpportunityComponentVectorComponents = {
+  culturalAffinity: OpportunityComponent;
+  descriptorOverlap: OpportunityComponent;
+  geographicSignal: OpportunityComponent;
+  venueReadiness: OpportunityComponent;
+  evidenceCompleteness: OpportunityComponent;
+};
+
+export type OpportunityComponentVectorComposite = {
+  status: OpportunityComponentVectorCompositeStatus;
+  /** @nullable */
+  score: OpportunityComponentVectorCompositeScore;
+  reason: string;
+};
+
+export interface OpportunityComponentVector {
+  methodologyVersion: OpportunityComponentVectorMethodologyVersion;
+  components: OpportunityComponentVectorComponents;
+  composite: OpportunityComponentVectorComposite;
+  assumptions: string[];
+  limitations: string[];
+}
+
+export type EvidenceDrivenRecommendationKind = typeof EvidenceDrivenRecommendationKind[keyof typeof EvidenceDrivenRecommendationKind];
+
+
+export const EvidenceDrivenRecommendationKind = {
+  cultural_validation: 'cultural_validation',
+  venue_option: 'venue_option',
+} as const;
+
+export interface EvidenceDrivenRecommendation {
+  id: string;
+  kind: EvidenceDrivenRecommendationKind;
+  title: string;
+  rationale: string;
+  evidenceReferences: string[];
+  limitations: string[];
+}
+
+export type UnifiedOpportunityAnalysisAffinityQueryStatuses = {
+  interestA: UnifiedOpportunityAnalysisAffinityQueryStatusesInterestA;
+  interestB: UnifiedOpportunityAnalysisAffinityQueryStatusesInterestB;
+  joint: UnifiedOpportunityAnalysisAffinityQueryStatusesJoint;
+};
+
+export type UnifiedOpportunityAnalysisAffinityInputAttributionsItem = {
+  entityId: string;
+  score: number;
+  matchesInput: boolean;
+  positive: boolean;
+};
+
+export type UnifiedOpportunityAnalysisAffinity = {
+  queryStatuses: UnifiedOpportunityAnalysisAffinityQueryStatuses;
+  interestAEvidence: AffinityScopeEvidence;
+  interestBEvidence: AffinityScopeEvidence;
+  jointAffinityStatus: UnifiedOpportunityAnalysisAffinityJointAffinityStatus;
+  /** @nullable */
+  jointAffinity: number | null;
+  /** @nullable */
+  jointAffinityRank: number | null;
+  attributionCoverage: UnifiedOpportunityAnalysisAffinityAttributionCoverage;
+  inputAttributions: UnifiedOpportunityAnalysisAffinityInputAttributionsItem[];
+  sourceReference: string;
+};
+
+export type UnifiedOpportunityAnalysisOverlapJaccard = {
+  status: UnifiedOpportunityAnalysisOverlapJaccardStatus;
+  /** @nullable */
+  value: number | null;
+  /** @nullable */
+  reason: UnifiedOpportunityAnalysisOverlapJaccardReason;
+  /** @minimum 0 */
+  intersectionSize: number;
+  /** @minimum 0 */
+  unionSize: number;
+};
+
+export type UnifiedOpportunityAnalysisOverlapCoverage = {
+  interestA: UnifiedOpportunityAnalysisOverlapCoverageInterestA;
+  interestB: UnifiedOpportunityAnalysisOverlapCoverageInterestB;
+  /** @minimum 0 */
+  interestATagCount: number;
+  /** @minimum 0 */
+  interestBTagCount: number;
+  /** @minimum 0 */
+  matchingTagCount: number;
+};
+
+export type UnifiedOpportunityAnalysisOverlap = {
+  status: UnifiedOpportunityAnalysisOverlapStatus;
+  matchingTags: OverlapTagPair[];
+  interestAOnlyTags: OverlapTagDescriptor[];
+  interestBOnlyTags: OverlapTagDescriptor[];
+  jaccard: UnifiedOpportunityAnalysisOverlapJaccard;
+  coverage: UnifiedOpportunityAnalysisOverlapCoverage;
+  sourceReferences: string[];
+};
+
+export type UnifiedOpportunityAnalysisJointAttribution = {
+  status: UnifiedOpportunityAnalysisJointAttributionStatus;
+  matchedInputEntityIds: string[];
+  sourceReference: string;
+};
+
+export interface UnifiedOpportunityAnalysis {
+  version: UnifiedOpportunityAnalysisVersion;
+  analysisReference: string;
+  candidateId: string;
+  candidateName: string;
+  affinity: UnifiedOpportunityAnalysisAffinity;
+  overlap: UnifiedOpportunityAnalysisOverlap;
+  jointAttribution: UnifiedOpportunityAnalysisJointAttribution;
+  scores: OpportunityComponentVector;
+  recommendations: EvidenceDrivenRecommendation[];
+}
+
+export interface GeographicAnalysisResponse {
+  summary: GeographicIntelligenceSummary;
+  analysis?: UnifiedOpportunityAnalysis;
+}
+
+export interface AtlasOverview {
+  savedDiscoveries: number;
+  savedPlans: number;
+  qloo: QlooStatus;
+  venueProviderConfigured: boolean;
 }
 
 export type VenueProviderStatusState = typeof VenueProviderStatusState[keyof typeof VenueProviderStatusState];

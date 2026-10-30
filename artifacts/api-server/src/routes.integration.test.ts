@@ -87,6 +87,7 @@ test("the API starts without OAuth configuration and serves public feature route
     { method: "DELETE", path: "/activation-plans/not-an-id", body: null, expectedStatus: 400 },
     { method: "POST", path: "/qloo/entities/search", body: {}, expectedStatus: 400 },
     { method: "POST", path: "/opportunities/heatmap", body: {}, expectedStatus: 400 },
+    { method: "POST", path: "/opportunities/intelligence/analyze", body: {}, expectedStatus: 400 },
   ];
 
   for (const { method, path, body, expectedStatus } of publicRequests) {
@@ -101,6 +102,73 @@ test("the API starts without OAuth configuration and serves public feature route
 
   const removedAuthEndpoint = await fetch(`${baseUrl}/auth/session`);
   assert.equal(removedAuthEndpoint.status, 404);
+});
+
+test("bounded geographic analysis reports unavailable sources without fabricated records", async () => {
+  const invalid = await fetch(`${baseUrl}/opportunities/intelligence/analyze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      city: "London",
+      entityId: "qloo-entity-id",
+      bounds: { south: 51.6, west: -0.2, north: 51.5, east: -0.05 },
+    }),
+  });
+  assert.equal(invalid.status, 400);
+
+  const response = await fetch(`${baseUrl}/opportunities/intelligence/analyze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      city: "London",
+      entityId: "qloo-entity-id",
+      bounds: { south: 51.45, west: -0.2, north: 51.55, east: -0.05 },
+      categories: [],
+    }),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    summary: {
+      heatmap: { status: string; pointCount: number; points: unknown[] };
+      venues: { status: string; recordCount: number; records: unknown[] };
+      coverage: string;
+      sourceSeparation: string;
+    };
+  };
+  assert.equal(body.summary.heatmap.status, "unavailable");
+  assert.equal(body.summary.heatmap.pointCount, 0);
+  assert.deepEqual(body.summary.heatmap.points, []);
+  assert.equal(body.summary.venues.status, "unavailable");
+  assert.equal(body.summary.venues.recordCount, 0);
+  assert.deepEqual(body.summary.venues.records, []);
+  assert.equal(body.summary.coverage, "unavailable");
+  assert.match(body.summary.sourceSeparation, /never treated as the same entity/);
+
+  const unlinkedVenue = await fetch(`${baseUrl}/opportunities/intelligence/analyze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      city: "London",
+      entityId: "qloo-entity-id",
+      selectedVenueId: "overture-venue-1",
+      bounds: { south: 51.45, west: -0.2, north: 51.55, east: -0.05 },
+      categories: [],
+    }),
+  });
+  assert.equal(unlinkedVenue.status, 400);
+
+  const staleReference = await fetch(`${baseUrl}/opportunities/intelligence/analyze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      city: "London",
+      entityId: "qloo-entity-id",
+      analysisReference: "00000000-0000-4000-8000-000000000001",
+      bounds: { south: 51.45, west: -0.2, north: 51.55, east: -0.05 },
+      categories: [],
+    }),
+  });
+  assert.equal(staleReference.status, 410);
 });
 
 test("production serves frontend assets and falls back only for frontend routes", async () => {

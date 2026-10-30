@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
@@ -13,13 +13,13 @@ import {
   useGenerateActivationPlanWithAgent,
   useAssessVenueSuitability,
   useGetVenueProviderStatus,
-  useGetAtlasOverview, useGetOpportunityHeatmap, useGetQlooStatus, useListActivationPlans,
+  useGetAtlasOverview, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
-  useSearchQlooEntities, useSearchVenues, useTestQlooConnection,
+  useAnalyzeGeographicIntelligence, useSearchQlooEntities, useSearchVenues, useTestQlooConnection,
 } from '@workspace/api-client-react';
 import type {
   ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus, Venue, VenueSearchInputCategoriesItem,
-  SavedDiscovery,
+  SavedDiscovery, GeographicAnalysisInput,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -40,13 +40,22 @@ import {
   buildActivationPlanSaveInput,
   buildDiscoverySaveInput,
   getSavedDiscoveryDetails,
+  isGeographicAnalysisSnapshot,
   type ActivationPlanDraft,
+  type GeographicAnalysisSnapshot,
 } from '@/lib/product-workflow';
 import NotFound from '@/pages/not-found';
-import { VenueMap, type VenueMapBounds } from '@/components/venue-map';
+import type { VenueMapBounds } from '@/components/venue-map';
+import { GeographicSummaryPanel } from '@/components/geographic-summary';
+import { AffinityComparisonPanel } from '@/components/affinity-comparison';
+import { OpportunityScorecard } from '@/components/opportunity-scorecard';
 import { clearSelectedVenueSession, clearVenueDraftSession } from '@/lib/venue-session';
 
 const queryClient = new QueryClient();
+const VenueMap = lazy(async () => {
+  const module = await import('@/components/venue-map');
+  return { default: module.VenueMap };
+});
 
 const navItems = [
   { href: '/', label: 'Overview', icon: Layers3 },
@@ -80,6 +89,66 @@ function readVenueAssessments(): NonNullable<ActivationPlanDraft['venueSuitabili
     return JSON.parse(sessionStorage.getItem('atlas:selected-venue-suitabilities') ?? '{}') as NonNullable<ActivationPlanDraft['venueSuitabilities']>;
   } catch {
     return {};
+  }
+}
+
+function readGeographicAnalysis(
+  entityId: string,
+  city?: string,
+  analysisReference?: string,
+) {
+  try {
+    const raw = sessionStorage.getItem('atlas:geographic-analysis');
+    if (!raw) return undefined;
+    const snapshot = JSON.parse(raw) as unknown;
+    if (!isGeographicAnalysisSnapshot(snapshot, entityId)) return undefined;
+    if (city && snapshot.city.trim().toLowerCase() !== city.trim().toLowerCase()) return undefined;
+    if (snapshot.analysisReference !== analysisReference) return undefined;
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistGeographicAnalysis(snapshot: GeographicAnalysisSnapshot) {
+  sessionStorage.setItem('atlas:geographic-analysis', JSON.stringify(snapshot));
+  try {
+    const rawDraft = sessionStorage.getItem('atlas:draft-plan');
+    if (!rawDraft) return;
+    const draft = JSON.parse(rawDraft) as {
+      candidate?: { id?: string };
+      [key: string]: unknown;
+    };
+    if (draft.candidate?.id !== snapshot.entityId) return;
+    sessionStorage.setItem('atlas:draft-plan', JSON.stringify({
+      ...draft,
+      geographicAnalysis: snapshot,
+    }));
+  } catch {
+    return;
+  }
+}
+
+interface AtlasAnalysisContext {
+  analysisReference: string;
+  city: string;
+  entityId: string;
+  candidateName: string;
+}
+
+function readAtlasAnalysisContext(): AtlasAnalysisContext | null {
+  try {
+    const raw = sessionStorage.getItem('atlas:analysis-context');
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<AtlasAnalysisContext>;
+    return typeof value.analysisReference === 'string' &&
+      typeof value.city === 'string' &&
+      typeof value.entityId === 'string' &&
+      typeof value.candidateName === 'string'
+      ? value as AtlasAnalysisContext
+      : null;
+  } catch {
+    return null;
   }
 }
 
@@ -398,14 +467,50 @@ function DiscoveryPage() {
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
     dispatchSaveFeedback({ type: 'clear' });
-    save.mutate({ data: buildDiscoverySaveInput(form, response, candidate, readSelectedVenues(), readVenueAssessments()) }, {
+    save.mutate({ data: buildDiscoverySaveInput(
+      form,
+      response,
+      candidate,
+      readSelectedVenues(),
+      readVenueAssessments(),
+      readGeographicAnalysis(candidate.id, form.city, response.analysisReference),
+    ) }, {
       onSuccess: () => { dispatchSaveFeedback({ type: 'success', message: 'Discovery saved to your evidence trail.' }); qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); },
       onError: () => dispatchSaveFeedback({ type: 'error', message: 'Discovery could not be saved. Please try again.' }),
     });
   };
   const makePlan = (candidate: BridgeCandidate) => {
-    sessionStorage.setItem('atlas:draft-plan', JSON.stringify({ form, candidate, response }));
+    const geographicAnalysis = readGeographicAnalysis(
+      candidate.id,
+      form.city,
+      response?.analysisReference,
+    );
+    if (response?.analysisReference) {
+      sessionStorage.setItem('atlas:analysis-context', JSON.stringify({
+        analysisReference: response.analysisReference,
+        city: form.city,
+        entityId: candidate.id,
+        candidateName: candidate.name,
+      }));
+    }
+    sessionStorage.setItem('atlas:draft-plan', JSON.stringify({
+      form,
+      candidate,
+      response,
+      ...(geographicAnalysis && { geographicAnalysis }),
+    }));
     setLocation('/plans');
+  };
+  const exploreGeography = (candidate: BridgeCandidate) => {
+    if (!response?.analysisReference) return;
+    sessionStorage.setItem('atlas:analysis-context', JSON.stringify({
+      analysisReference: response.analysisReference,
+      city: form.city,
+      entityId: candidate.id,
+      candidateName: candidate.name,
+    }));
+    sessionStorage.setItem('atlas:draft-plan', JSON.stringify({ form, candidate, response }));
+    setLocation('/atlas');
   };
   return (
     <div className="page-in">
@@ -451,7 +556,7 @@ function DiscoveryPage() {
           {!response && discoveryEvidence.status === 'idle' && <div className="surface flex min-h-[475px] flex-col items-center justify-center rounded-2xl px-6 text-center"><div className="relative mb-6 flex h-[90px] w-[90px] items-center justify-center rounded-full border border-violet-200/15 bg-violet-300/[.04]"><div className="absolute inset-3 rounded-full border border-cyan-200/10" /><Waypoints size={27} className="text-[#a890f2]" /><span className="absolute right-1 top-4 h-2 w-2 rounded-full bg-[#70dce7]" /></div><div className="eyebrow text-[9px] text-[#8b7cc0]">Ready for inquiry</div><h2 className="mt-3 text-[20px] font-semibold text-[#e4e5ef]">Your evidence panel is waiting</h2><p className="mt-2 max-w-[360px] text-[12px] leading-6 text-[#828da3]">Submit two interests and a planning context. Returned evidence will appear here with its source and confidence level.</p></div>}
           {discoveryEvidence.status === 'loading' && <div className="space-y-3"><Skeleton className="h-28" /><Skeleton className="h-48" /><Skeleton className="h-48" /></div>}
           {discoveryEvidence.status === 'error' && <ErrorNotice title="We couldn’t complete this comparison" onRetry={() => requestDiscovery(form)} />}
-          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={(candidate) => dispatchDiscoveryEvidence({ type: 'candidate-selected', candidate })} onSave={saveResult} onPlan={makePlan} saving={save.isPending} saveFeedback={saveFeedback} />}
+          {response && <Results response={response} city={form.city} interestA={form.interestA} interestB={form.interestB} recommendationType={form.recommendationType} selected={selected} onSelect={(candidate) => dispatchDiscoveryEvidence({ type: 'candidate-selected', candidate })} onSave={saveResult} onPlan={makePlan} onExplore={exploreGeography} saving={save.isPending} saveFeedback={saveFeedback} />}
         </section>
       </div>
     </div>
@@ -462,10 +567,10 @@ function Field({ label, required, children }: { label: string; required?: boolea
   return <label className="block"><span className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold text-[#a8b0c1]">{label}{required && <span className="text-[#c69aff]">*</span>}</span>{children}</label>;
 }
 
-function Results({ response, city, interestA, interestB, recommendationType, selected, onSelect, onSave, onPlan, saving, saveFeedback }: {
+function Results({ response, city, interestA, interestB, recommendationType, selected, onSelect, onSave, onPlan, onExplore, saving, saveFeedback }: {
   response: DiscoveryResponse; city: string; interestA: string; interestB: string; recommendationType: DiscoveryInputRecommendationType | undefined; selected: BridgeCandidate | null;
   onSelect: (candidate: BridgeCandidate | null) => void; onSave: (candidate: BridgeCandidate) => void;
-  onPlan: (candidate: BridgeCandidate) => void; saving: boolean; saveFeedback: MutationFeedback;
+  onPlan: (candidate: BridgeCandidate) => void; onExplore: (candidate: BridgeCandidate) => void; saving: boolean; saveFeedback: MutationFeedback;
 }) {
   const candidates = response.candidates ?? [];
   return <div className="space-y-4 page-in">
@@ -482,6 +587,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
       <div className="p-5"><div className="flex items-start gap-4"><div className="mono flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200/15 bg-violet-200/[.05] text-[10px] text-[#b7a5f2]">{String(index + 1).padStart(2, '0')}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-[16px] font-semibold tracking-[-.02em] text-[#e5e5ef]">{candidate.name}</h3><p className="mt-1.5 max-w-[620px] text-[11px] leading-5 text-[#8f9ab0]">{candidate.explanation}</p></div><div className="text-right"><div className="mono text-[22px] font-medium tracking-[-.06em] text-[#b5a2f4]">{candidate.score}<span className="text-[10px] text-[#778198]">/100</span></div><div className="text-[8px] uppercase tracking-[.13em] text-[#778197]">Derived score</div></div></div>
         <div className="mt-4 flex flex-wrap items-center gap-2"><span className={cx('rounded-full border px-2 py-1 text-[9px] tracking-[.04em]', displayedConfidence === 'high' ? 'border-emerald-200/20 bg-emerald-100/[.04] text-emerald-100/80' : displayedConfidence === 'medium' ? 'border-amber-200/20 bg-amber-100/[.04] text-amber-100/80' : 'border-white/10 text-[#a0a8b8]')}>{displayedConfidence === 'high' ? 'Both inputs attributed' : displayedConfidence === 'medium' ? 'One input attributed' : 'Input attribution unavailable'}</span><span className="rounded-full border border-violet-200/15 px-2 py-1 text-[9px] text-[#a99ae1]">{evidenceItems.length} evidence items</span><button onClick={() => onSelect(selected?.id === candidate.id ? null : candidate)} className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-semibold text-[#a9b4c9] hover:text-white" data-testid={`button-evidence-${candidate.id}`}>{selected?.id === candidate.id ? 'Hide evidence' : 'Inspect evidence'}<ChevronDown size={13} className={cx('transition-transform', selected?.id === candidate.id && 'rotate-180')} /></button></div>
       </div></div></div>
+      <AffinityComparisonPanel candidate={candidate} interestA={interestA} interestB={interestB} />
       {tasteEvidence.length > 0 && <div className="grid gap-3 border-t border-white/[.06] px-5 py-4 md:grid-cols-2">
         {tasteEvidence.map((item) => {
           const status = tasteEvidenceStatus(item.value);
@@ -518,7 +624,7 @@ function Results({ response, city, interestA, interestB, recommendationType, sel
         </div>
       </div>
       {selected?.id === candidate.id && <div className="border-t border-white/[.07] bg-[#0c111c]/55 px-5 py-4"><div className="mb-3 flex items-center justify-between"><div><div className="eyebrow text-[9px] text-[#8791a7]">Evidence ledger</div><div className="mt-1 text-[10px] text-[#707b90]">{candidate.scoreDescription}</div></div><CircleHelp size={15} className="text-[#748097]" /></div>{evidenceItems.length ? <div className="grid gap-2 md:grid-cols-2">{evidenceItems.map((item, i) => <div key={`${item.source}-${i}`} className="rounded-xl border border-white/[.07] bg-white/[.018] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#d2d7e4]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-2 text-[11px] leading-5 text-[#a3adbf]">{item.value}</div><div className="mt-2 mono text-[9px] text-[#727e94]">Source · {item.source}</div></div>)}</div> : <EmptyInline title="No evidence details returned" description="This candidate has no evidence records to inspect." />}</div>}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[.06] px-5 py-3"><span className="text-[9px] text-[#717d93]">Score is derived, not a direct measure of audience size.</span><div className="flex gap-1"><Button variant="quiet" className="text-[10px]" onClick={() => onSave(candidate)} disabled={saving}><Bookmark size={13} />{saving ? 'Saving…' : 'Save discovery'}</Button><Button variant="outline" className="text-[10px]" onClick={() => onPlan(candidate)}><FileText size={13} />Build plan</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[.06] px-5 py-3"><span className="text-[9px] text-[#717d93]">Score is derived, not a direct measure of audience size.</span><div className="flex flex-wrap gap-1"><Button variant="quiet" className="text-[10px]" onClick={() => onSave(candidate)} disabled={saving}><Bookmark size={13} />{saving ? 'Saving…' : 'Save discovery'}</Button>{response.analysisReference && <Button variant="outline" className="text-[10px]" onClick={() => onExplore(candidate)}><Map size={13} />Explore Atlas</Button>}<Button variant="outline" className="text-[10px]" onClick={() => onPlan(candidate)}><FileText size={13} />Build plan</Button></div></div>
         </article>;
     })}
     {saveFeedback && <div role={saveFeedback.type === 'error' ? 'alert' : 'status'} className={cx('text-[11px]', saveFeedback.type === 'error' ? 'text-rose-200' : 'text-emerald-200')}>{saveFeedback.type === 'success' && <Check size={13} className="mr-1 inline" />}{saveFeedback.message}</div>}
@@ -552,10 +658,24 @@ function EvidenceKind({ kind }: { kind: string }) {
 
 function AtlasPage() {
   const overview = useGetAtlasOverview();
-  const [city, setCity] = useState('');
-  const [entityQuery, setEntityQuery] = useState('');
-  const [entityId, setEntityId] = useState('');
-  const heatmap = useGetOpportunityHeatmap();
+  const [analysisContext, setAnalysisContext] = useState(readAtlasAnalysisContext);
+  const [city, setCity] = useState(analysisContext?.city ?? '');
+  const [entityQuery, setEntityQuery] = useState(analysisContext?.candidateName ?? '');
+  const [entityId, setEntityId] = useState(analysisContext?.entityId ?? '');
+  const geographicAnalysis = useAnalyzeGeographicIntelligence();
+  const geographicRequest = useRef<GeographicAnalysisInput | null>(null);
+  const heatmap = {
+    ...geographicAnalysis,
+    data: geographicAnalysis.data
+      ? {
+          source: 'qloo_api' as const,
+          points: geographicAnalysis.data.summary.heatmap.points,
+        }
+      : undefined,
+    isError: geographicAnalysis.isError ||
+      geographicAnalysis.data?.summary.heatmap.status === 'unavailable',
+  };
+  const geographicSummary = geographicAnalysis.data?.summary;
   const status = useGetQlooStatus();
   const catalogSearch = useSearchQlooEntities();
   const venueProvider = useGetVenueProviderStatus();
@@ -610,14 +730,41 @@ function AtlasPage() {
         qlooEvidence: interests.candidate?.evidence ?? [],
       },
     }, {
-      onSuccess: (assessment) => setVenueAssessments((current) => {
-        const next = { ...current, [venue.providerVenueId]: assessment };
-        sessionStorage.setItem('atlas:selected-venue-suitabilities', JSON.stringify(next));
-        sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(assessment));
-        return next;
-      }),
+      onSuccess: (assessment) => {
+        setVenueAssessments((current) => {
+          const next = { ...current, [venue.providerVenueId]: assessment };
+          sessionStorage.setItem('atlas:selected-venue-suitabilities', JSON.stringify(next));
+          sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(assessment));
+          return next;
+        });
+        const request = geographicRequest.current;
+        const venueWasAnalyzed = geographicAnalysis.data?.summary.venues.records.some(
+          ({ providerVenueId }) => providerVenueId === venue.providerVenueId,
+        ) ?? false;
+        if (
+          analysisContext &&
+          venueWasAnalyzed &&
+          request?.analysisReference === analysisContext.analysisReference &&
+          analysisContext.entityId === entityId
+        ) {
+          geographicAnalysis.mutate({
+            data: { ...request, selectedVenueId: venue.providerVenueId },
+          }, {
+            onSuccess: (result) => {
+              persistGeographicAnalysis({
+                version: 'geographic-intelligence/1',
+                analysisReference: analysisContext.analysisReference,
+                city: city.trim(),
+                entityId,
+                summary: result.summary,
+                ...(result.analysis && { analysis: result.analysis }),
+              });
+            },
+          });
+        }
+      },
     });
-  }, [entityQuery, venueCategory, venueSuitability]);
+  }, [analysisContext, city, entityId, entityQuery, geographicAnalysis, venueCategory, venueSuitability]);
   const searchVenues = () => {
     autoSearchEnabled.current = true;
     const requestId = ++latestVenueSearch.current;
@@ -681,8 +828,37 @@ function AtlasPage() {
   };
   const run = (event: FormEvent) => {
     event.preventDefault();
-    if (!city.trim() || !entityId.trim() || !status.data?.configured) return;
-    heatmap.mutate({ data: { city, entityId } });
+    if (!city.trim() || !entityId.trim()) return;
+    const request: GeographicAnalysisInput = {
+      city: city.trim(),
+      entityId,
+      bounds: venueBounds,
+      categories: venueCategory ? [venueCategory] : [],
+      ...(venueQuery.trim() && { query: venueQuery.trim() }),
+      limit: 25,
+      ...(analysisContext?.entityId === entityId &&
+        analysisContext.city.trim().toLowerCase() === city.trim().toLowerCase() && {
+          analysisReference: analysisContext.analysisReference,
+        }),
+    };
+    geographicRequest.current = request;
+    geographicAnalysis.mutate({ data: request }, {
+      onSuccess: (result) => {
+        const { summary } = result;
+        setVenues(summary.venues.records);
+        setSelectedVenue(null);
+        setFitRequest((value) => value + 1);
+        venueSearch.reset();
+        persistGeographicAnalysis({
+          version: 'geographic-intelligence/1',
+          ...(request.analysisReference && { analysisReference: request.analysisReference }),
+          city: city.trim(),
+          entityId,
+          summary,
+          ...(result.analysis && { analysis: result.analysis }),
+        });
+      },
+    });
   };
   const points = heatmap.data?.points ?? [];
   const bounds = useMemo(() => {
@@ -697,11 +873,14 @@ function AtlasPage() {
     {venueProvider.isError && <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-100/[.035] p-4"><MapPin size={16} className="mt-0.5 shrink-0 text-[#dbb969]" /><div><div className="text-[12px] font-semibold text-[#ded1ac]">Venue provider status unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#928a77]">Venue discovery could not be reached. The existing heatmap remains available.</p></div></div>}
     {!venueProvider.isLoading && venueProvider.data && <div className={cx('mb-5 rounded-xl border px-4 py-3', venueProvider.data.configured ? 'border-emerald-100/15 bg-emerald-100/[.025]' : 'border-amber-100/15 bg-amber-100/[.025]')}><div className="text-[10px] font-semibold text-[#cbd1df]">Primary venue source · Overture Maps Places</div><p className="mt-1 text-[9px] leading-5 text-[#929db1]">{venueProvider.data.message}</p></div>}
     {!status.isLoading && !status.data?.configured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-white/[.09] bg-white/[.02] p-4"><Globe2 size={16} className="mt-0.5 shrink-0 text-[#858fa4]" /><div><div className="text-[12px] font-semibold text-[#bdc4d2]">Heatmap source unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">Qloo is not configured for this workspace. Geographic signal requests are disabled until an administrator configures the source.</p></div></div>}
+    {geographicAnalysis.isError && analysisContext && <div role="alert" className="mb-5 rounded-lg border border-amber-100/15 bg-amber-100/[.035] px-4 py-3 text-[10px] leading-5 text-[#c5b78f]">This Discovery analysis reference expired or is unavailable. <Link href="/discover" className="underline underline-offset-2">Run Discovery again</Link> to refresh cultural evidence. Existing venue search and planner controls remain available.</div>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <Panel className="min-h-[490px]">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#78849a]">Spatial evidence</div><h2 className="mt-1 text-[16px] font-semibold">Returned coordinate field</h2></div><span className="rounded-full border border-white/[.1] px-2 py-1 text-[9px] text-[#8c97aa]">Source dependent</span></div>
         {heatmap.isPending ? <div className="grid h-[350px] place-items-center rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="text-center text-[11px] text-[#93a0b5]"><LoaderCircle size={18} className="mx-auto mb-3 animate-spin text-[#8fe2e8]" />Requesting geographic evidence…</div></div> : heatmap.isError ? <ErrorNotice title="Geographic evidence unavailable" /> : !heatmap.data ? <div className="relative grid h-[350px] place-items-center overflow-hidden rounded-xl border border-white/[.07] bg-[#0b101b]"><div className="absolute inset-0 opacity-35" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px,transparent 1px)', backgroundSize: '42px 42px' }} /><div className="relative max-w-[350px] px-5 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-cyan-100/10 bg-cyan-100/[.04] text-[#72dbe4]"><Globe2 size={20} /></div><h3 className="mt-4 text-[14px] font-semibold">No location data loaded</h3><p className="mt-2 text-[11px] leading-5 text-[#7f8ba0]">Add a city and an entity ID from a connected catalog search to request an evidence-backed heatmap.</p></div></div> : !points.length ? <div className="grid h-[350px] place-items-center rounded-xl border border-dashed border-white/[.1] bg-[#0b101b] px-6 text-center"><div><Map size={22} className="mx-auto text-[#718097]" /><h3 className="mt-3 text-[13px] font-semibold text-[#c4cada]">No geographic points returned</h3><p className="mt-1 text-[10px] text-[#788499]">The source returned an empty heatmap for this entity and city.</p></div></div> : <div><div className="relative h-[350px] overflow-hidden rounded-xl border border-cyan-100/[.12] bg-[#0b101b]"><div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(142,156,188,.07) 1px, transparent 1px),linear-gradient(90deg,rgba(142,156,188,.07) 1px, transparent 1px)', backgroundSize: '42px 42px' }} /><div className="absolute left-4 top-4 rounded-lg border border-white/[.08] bg-[#111827]/90 px-3 py-2 text-[9px] text-[#9eabc0]">Qloo coordinates · {points.length} points</div>{bounds && points.map((point, i) => { const x = bounds.maxLon === bounds.minLon ? 50 : 8 + ((point.longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 84; const y = bounds.maxLat === bounds.minLat ? 50 : 8 + ((bounds.maxLat - point.latitude) / (bounds.maxLat - bounds.minLat)) * 84; const display = describeHeatmapPoint(point, i); return <div key={`${point.latitude}-${point.longitude}-${i}`} title={`${display.label} · ${display.coordinates}`} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100/35 bg-cyan-300/30" style={{ left: `${x}%`, top: `${y}%`, width: `${display.markerSize}px`, height: `${display.markerSize}px` }} />; })}<div className="absolute bottom-3 right-3 text-[8px] text-[#717c90]">Returned coordinates · schematic positions · no geographic basemap</div></div><div className="mt-3 rounded-xl border border-white/[.07] bg-white/[.018] p-3"><div className="flex flex-wrap gap-x-4 gap-y-2 text-[9px] text-[#aab4c6]"><span className="flex items-center gap-2"><span className="h-[10px] w-[10px] rounded-full border border-cyan-100/35 bg-cyan-300/30" />Uniform marker · one returned point</span><span>Position · relative to returned coordinate bounds, not a basemap</span><span>Size · fixed; does not represent affinity or popularity</span></div><div className="mt-2 text-[9px] leading-4 text-[#8792a6]">Returned metrics per point (not used for marker size):</div><div className="mt-2 max-h-36 space-y-1 overflow-auto">{points.map((point, i) => { const display = describeHeatmapPoint(point, i); return <div key={`${point.latitude}-${point.longitude}-${i}`} className="grid gap-1 border-t border-white/[.05] pt-1 text-[9px] text-[#929db2] sm:grid-cols-[70px_1fr_1fr_1fr_1fr]"><span>{display.label}</span><span>Coordinates: {display.coordinates}</span><span>Affinity: {display.affinity}</span><span>Rank: {display.affinityRank}</span><span>Popularity: {display.popularity}</span></div>; })}</div></div></div>}
         {heatmap.data && <div className="mt-3 flex flex-wrap gap-4 text-[9px] text-[#7e8a9f]"><span>Response source: <b className="font-medium text-[#b6c0d2]">{heatmap.data.source}</b></span><span>Points: <b className="font-medium text-[#b6c0d2]">{points.length}</b></span></div>}
+        <GeographicSummaryPanel summary={geographicSummary} />
+        <OpportunityScorecard analysis={geographicAnalysis.data?.analysis} />
       </Panel>
       <div className="space-y-5">
         <Panel>
@@ -709,21 +888,21 @@ function AtlasPage() {
           <h2 className="mt-1 text-[15px] font-semibold">Request heatmap</h2>
           <p className="mt-2 text-[10px] leading-5 text-[#838ea3]">Choose a bridge from Qloo’s entity catalog. The heatmap is requested only for the returned entity ID.</p>
           <form onSubmit={run} className="mt-4 space-y-3">
-            <Field label="City" required><input value={city} onChange={(e) => setCity(e.target.value)} className="field" placeholder="City name" data-testid="input-atlas-city" /></Field>
+            <Field label="City" required><input value={city} onChange={(e) => { setCity(e.target.value); setAnalysisContext(null); sessionStorage.removeItem('atlas:analysis-context'); }} className="field" placeholder="City name" data-testid="input-atlas-city" /></Field>
             <Field label="Bridge / cultural entity" required>
               <div className="flex gap-2">
-                <input value={entityQuery} onChange={(e) => { setEntityQuery(e.target.value); setEntityId(''); }} className="field min-w-0 flex-1" placeholder="Search the catalog" data-testid="input-atlas-bridge" />
+                <input value={entityQuery} onChange={(e) => { setEntityQuery(e.target.value); setEntityId(''); setAnalysisContext(null); sessionStorage.removeItem('atlas:analysis-context'); }} className="field min-w-0 flex-1" placeholder="Search the catalog" data-testid="input-atlas-bridge" />
                 <Button variant="outline" type="button" disabled={!entityQuery.trim() || catalogSearch.isPending || !status.data?.configured} onClick={searchCatalog} aria-label="Search Qloo catalog">{catalogSearch.isPending ? <LoaderCircle size={14} className="animate-spin" /> : <Search size={14} />}</Button>
               </div>
             </Field>
             {catalogSearch.isError && <div className="text-[10px] text-rose-200/80">Catalog search failed. Check the Qloo connection in Settings.</div>}
             {catalogSearch.data && <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-white/[.08] p-2" role="listbox" aria-label="Qloo catalog results">
-              {catalogSearch.data.entities.length ? catalogSearch.data.entities.map((entity) => <button type="button" key={entity.id} role="option" aria-selected={entityId === entity.id} onClick={() => { setEntityId(entity.id); setEntityQuery(entity.name); }} className={cx('flex w-full items-start justify-between gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]', entityId === entity.id && 'bg-cyan-100/[.06]')}>
+              {catalogSearch.data.entities.length ? catalogSearch.data.entities.map((entity) => <button type="button" key={entity.id} role="option" aria-selected={entityId === entity.id} onClick={() => { setEntityId(entity.id); setEntityQuery(entity.name); setAnalysisContext(null); sessionStorage.removeItem('atlas:analysis-context'); }} className={cx('flex w-full items-start justify-between gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/[.05]', entityId === entity.id && 'bg-cyan-100/[.06]')}>
                 <span className="min-w-0"><span className="block truncate text-[10px] text-[#d4dbe7]">{entity.name}</span><span className="mono mt-1 block break-all text-[8px] text-[#718096]">{entity.id}</span></span><span className="shrink-0 text-[8px] text-[#7f8ba0]">{entity.type ?? entity.subtype ?? 'Entity'}</span>
               </button>) : <div className="px-2 py-3 text-[10px] text-[#818ca1]">No matching entities returned.</div>}
             </div>}
             {entityId && <div className="rounded-lg border border-cyan-100/10 bg-cyan-100/[.025] px-3 py-2 text-[9px] text-[#9bdae0]">Selected Qloo ID <span className="mono ml-1 break-all text-[#b5c4d3]">{entityId}</span></div>}
-            <Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending || !status.data?.configured} type="submit"><Radar size={14} />Request spatial signal</Button>
+            <Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending} type="submit"><Radar size={14} />Analyze bounded area</Button>
           </form>
           <div className="mt-5 border-t border-white/[.07] pt-4">
             <div className="eyebrow text-[9px] text-[#78849a]">Overture Maps Places</div>
@@ -748,7 +927,7 @@ function AtlasPage() {
           <div><div className="eyebrow text-[9px] text-[#78849a]">Local venue data</div><h2 className="mt-1 text-[16px] font-semibold">Overture Maps Places</h2></div>
           <span className="text-[9px] text-[#7d899e]">{venueSearch.data?.source === 'openstreetmap' ? '© OpenStreetMap contributors' : 'Overture Maps Places · source notices apply'}</span>
         </div>
-        {venueSearch.isError ? <ErrorNotice title="Venue discovery unavailable" onRetry={searchVenues} /> : <VenueMap venues={venues} selectedVenueId={selectedVenue?.providerVenueId} selectedVenueIds={shortlist} onSelect={handleVenueSelect} onBoundsChange={handleMapBounds} fitRequest={fitRequest} />}
+        {venueSearch.isError ? <ErrorNotice title="Venue discovery unavailable" onRetry={searchVenues} /> : <Suspense fallback={<div className="venue-map-canvas grid place-items-center text-[10px] text-[#8490a4]" role="status">Loading interactive map…</div>}><VenueMap venues={venues} selectedVenueId={selectedVenue?.providerVenueId} selectedVenueIds={shortlist} onSelect={handleVenueSelect} onBoundsChange={handleMapBounds} fitRequest={fitRequest} /></Suspense>}
         {venues.length === 0 && !venueSearch.isPending && !venueSearch.isError && <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Search this London map area to load actual Overture records. Empty results are shown as empty; no venues are fabricated.</p>}
       </Panel>
       <div className="space-y-5">
@@ -1032,6 +1211,7 @@ function PlanRow({ plan, expanded, onToggle, onExport, onDelete, deleting }: { p
         </div>)}</div>
       </section>}
       <section><div className="eyebrow text-[9px] text-[#78849a]">Stored source evidence</div>{details.source && <div className="mt-1 text-[9px] text-[#909bb0]">Response source: {details.source}</div>}{details.evidence.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.evidence.map((item, index) => <div key={`${item.source}-${index}`} className="rounded-lg border border-cyan-100/[.08] bg-cyan-100/[.02] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#c5ccda]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#929db2]">{item.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">Source · {item.source}</div></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored evidence details are available on this plan.</p>}{details.caveat && <p className="mt-2 text-[10px] leading-5 text-[#aab4c6]">Stored caveat: {details.caveat}</p>}</section>
+      {details.geographicAnalysis?.analysis && <OpportunityScorecard analysis={details.geographicAnalysis.analysis} />}
       <section><div className="eyebrow text-[9px] text-[#bca26d]">{details.strategySource === 'ai_generated' ? 'AI-generated strategy · Qloo citations preserved' : details.strategySource === 'deterministic_fallback' ? 'Deterministic fallback · not AI-generated' : 'Stored planning content · historical record'}</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.userProvidedAssumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">User-provided assumptions · not independently verified</div><ul className="mt-1 list-disc pl-4">{details.userProvidedAssumptions.map((assumption, index) => <li key={`user-${index}-${assumption}`}>{assumption}</li>)}</ul></div>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored planning assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
       <section className="rounded-lg border border-white/[.07] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Budget constraint</div>{details.budgetRange || details.budgetStatus ? <><div className="mt-1 text-[10px] text-[#c5ccda]">{details.budgetRange ?? 'Range not recorded'}</div>{details.budgetStatus && <div className="mt-1 text-[9px] text-[#8792a6]">{details.budgetStatus}</div>}</> : <p className="mt-1 text-[10px] text-[#8792a6]">No budget constraint was stored.</p>}</section>
     </div>}
@@ -1069,7 +1249,34 @@ function SavedCard({ item, expanded, onExpand, onDelete, deleting }: { item: Sav
   const savedDetails = getSavedDiscoveryDetails(item.result);
   const candidate = savedDetails.candidate;
   const caveat = savedDetails.caveat ?? 'Saved result did not include a source caveat.';
-  return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`card-saved-${item.id}`}><div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onExpand} className="min-w-0 flex-1 text-left" data-testid={`button-open-saved-${item.id}`}><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[13px] font-semibold text-[#dce0ea]">{item.title}</h2><span className="rounded-full border border-cyan-100/10 px-2 py-0.5 text-[8px] text-[#7edce3]">Saved record</span></div><div className="mt-1.5 text-[10px] text-[#838ea4]">{item.interestA} <span className="text-[#a995f1]">×</span> {item.interestB} · {item.city} · {formatDate(item.createdAt)}</div></button><div className="flex items-center gap-1"><Button variant="quiet" className="text-[10px]" onClick={onExpand}>{expanded ? 'Close details' : 'Inspect result'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${item.title}`}><Trash2 size={14} /></Button></div></div>
+  const exploreAtlas = () => {
+    if (!candidate || !savedDetails.input || !savedDetails.analysisReference) return;
+    const parsedDate = new Date(savedDetails.generatedAt ?? item.createdAt);
+    const generatedAt = parsedDate.toISOString();
+    const response: DiscoveryResponse = {
+      source: 'qloo_api',
+      candidates: [candidate],
+      caveat,
+      generatedAt,
+      analysisReference: savedDetails.analysisReference,
+    };
+    sessionStorage.setItem('atlas:analysis-context', JSON.stringify({
+      analysisReference: savedDetails.analysisReference,
+      city: item.city,
+      entityId: candidate.id,
+      candidateName: candidate.name,
+    }));
+    sessionStorage.setItem('atlas:draft-plan', JSON.stringify({
+      form: savedDetails.input,
+      candidate,
+      response,
+      ...(savedDetails.geographicAnalysis && {
+        geographicAnalysis: savedDetails.geographicAnalysis,
+      }),
+    }));
+    window.location.assign('/atlas');
+  };
+  return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`card-saved-${item.id}`}><div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onExpand} className="min-w-0 flex-1 text-left" data-testid={`button-open-saved-${item.id}`}><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[13px] font-semibold text-[#dce0ea]">{item.title}</h2><span className="rounded-full border border-cyan-100/10 px-2 py-0.5 text-[8px] text-[#7edce3]">Saved record</span></div><div className="mt-1.5 text-[10px] text-[#838ea4]">{item.interestA} <span className="text-[#a995f1]">×</span> {item.interestB} · {item.city} · {formatDate(item.createdAt)}</div></button><div className="flex items-center gap-1">{candidate && savedDetails.analysisReference && savedDetails.input && <Button variant="outline" className="text-[10px]" onClick={exploreAtlas}><Map size={13} />Explore Atlas</Button>}<Button variant="quiet" className="text-[10px]" onClick={onExpand}>{expanded ? 'Close details' : 'Inspect result'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${item.title}`}><Trash2 size={14} /></Button></div></div>
     {expanded && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="eyebrow text-[9px] text-[#77849a]">Stored response · no refresh implied</div>{candidate ? <div className="mt-3 rounded-lg border border-white/[.07] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="text-[12px] font-semibold text-[#d6dbe7]">{candidate.name}</div><div className="mono text-[11px] text-[#b2a0f1]">{candidate.score}/100 · derived</div></div><p className="mt-2 text-[10px] leading-5 text-[#929db2]">{candidate.explanation}</p>{candidate.evidence?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{candidate.evidence.map((ev, idx) => <div key={idx} className="rounded-lg bg-white/[.025] p-2.5"><div className="flex justify-between gap-2"><span className="text-[10px] text-[#c5ccda]">{ev.label}</span><EvidenceKind kind={ev.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#8995aa]">{ev.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">{ev.source}</div></div>)}</div>}</div> : <div className="text-[10px] text-[#8994a8]">No selected bridge details were stored in this record.</div>}{savedDetails.venues.length > 0 && <section className="mt-3 rounded-lg border border-cyan-100/[.1] bg-cyan-100/[.02] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Associated venue selections · {savedDetails.venues.length}</div><div className="mt-2 space-y-3">{savedDetails.venues.map((venue) => <div key={venue.providerVenueId} className="border-t border-white/[.07] pt-2 first:border-0 first:pt-0"><div className="text-[11px] font-semibold text-[#d7dce6]">{venue.name}</div><div className="mt-1 text-[9px] text-[#929db1]">{venue.address || `${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}`} · {venue.categories.join(', ') || 'category not provided'}</div><div className="mt-1 mono text-[8px] text-[#737f94]">{venue.providerVenueId} · {venue.attribution}</div></div>)}</div></section>}<p className="mt-3 text-[10px] leading-5 text-[#8b96ab]">Caveat: {caveat}</p></div>}
   </article>;
 }

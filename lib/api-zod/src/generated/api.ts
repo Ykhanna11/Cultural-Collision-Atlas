@@ -136,6 +136,7 @@ export const discoverCulturalBridgesResponseCandidatesItemScoreMax = 100;
 
 
 export const DiscoverCulturalBridgesResponse = zod.object({
+  "analysisReference": zod.string().uuid().optional(),
   "source": zod.enum(['qloo_api']),
   "candidates": zod.array(zod.object({
   "id": zod.string(),
@@ -535,6 +536,356 @@ export const GetOpportunityHeatmapResponse = zod.object({
 })
 
 
+/**
+ * @summary Analyze bounded Qloo signals and actual venue records
+ */
+export const analyzeGeographicIntelligenceBodyCityMax = 120;
+
+export const analyzeGeographicIntelligenceBodyEntityIdMax = 160;
+
+export const analyzeGeographicIntelligenceBodySelectedVenueIdMax = 160;
+
+export const analyzeGeographicIntelligenceBodyBoundsSouthMin = -90;
+export const analyzeGeographicIntelligenceBodyBoundsSouthMax = 90;
+
+export const analyzeGeographicIntelligenceBodyBoundsWestMin = -180;
+export const analyzeGeographicIntelligenceBodyBoundsWestMax = 180;
+
+export const analyzeGeographicIntelligenceBodyBoundsNorthMin = -90;
+export const analyzeGeographicIntelligenceBodyBoundsNorthMax = 90;
+
+export const analyzeGeographicIntelligenceBodyBoundsEastMin = -180;
+export const analyzeGeographicIntelligenceBodyBoundsEastMax = 180;
+
+export const analyzeGeographicIntelligenceBodyQueryMax = 120;
+
+export const analyzeGeographicIntelligenceBodyLimitDefault = 25;
+export const analyzeGeographicIntelligenceBodyLimitMax = 50;
+
+
+
+export const AnalyzeGeographicIntelligenceBody = zod.object({
+  "city": zod.string().min(1).max(analyzeGeographicIntelligenceBodyCityMax),
+  "entityId": zod.string().min(1).max(analyzeGeographicIntelligenceBodyEntityIdMax),
+  "analysisReference": zod.string().uuid().optional(),
+  "selectedVenueId": zod.string().min(1).max(analyzeGeographicIntelligenceBodySelectedVenueIdMax).optional(),
+  "bounds": zod.object({
+  "south": zod.number().min(analyzeGeographicIntelligenceBodyBoundsSouthMin).max(analyzeGeographicIntelligenceBodyBoundsSouthMax),
+  "west": zod.number().min(analyzeGeographicIntelligenceBodyBoundsWestMin).max(analyzeGeographicIntelligenceBodyBoundsWestMax),
+  "north": zod.number().min(analyzeGeographicIntelligenceBodyBoundsNorthMin).max(analyzeGeographicIntelligenceBodyBoundsNorthMax),
+  "east": zod.number().min(analyzeGeographicIntelligenceBodyBoundsEastMin).max(analyzeGeographicIntelligenceBodyBoundsEastMax)
+}),
+  "categories": zod.array(zod.enum(['restaurant', 'cafe', 'shopping', 'entertainment', 'sports', 'culture', 'museum', 'event_space'])).optional(),
+  "query": zod.string().max(analyzeGeographicIntelligenceBodyQueryMax).optional(),
+  "limit": zod.number().int().min(1).max(analyzeGeographicIntelligenceBodyLimitMax).default(analyzeGeographicIntelligenceBodyLimitDefault)
+})
+
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsSouthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsSouthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsWestMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsWestMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsNorthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsNorthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsEastMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryRequestedBoundsEastMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneSouthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneSouthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneWestMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneWestMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneNorthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneNorthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneEastMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneEastMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryHeatmapPointCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryHeatmapDuplicateCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryHeatmapInvalidCoordinateCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesRecordCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesDuplicateCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesInvalidCoordinateCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesCategoryCountsItemCountMin = 0;
+
+
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLatitudeMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLatitudeMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLongitudeMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLongitudeMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneSouthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneSouthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneWestMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneWestMax = 180;
+
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneNorthMin = -90;
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneNorthMax = 90;
+
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneEastMin = -180;
+export const analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneEastMax = 180;
+
+export const analyzeGeographicIntelligenceResponseAnalysisOverlapJaccardIntersectionSizeMin = 0;
+
+export const analyzeGeographicIntelligenceResponseAnalysisOverlapJaccardUnionSizeMin = 0;
+
+export const analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageInterestATagCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageInterestBTagCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageMatchingTagCountMin = 0;
+
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsCulturalAffinityScoreMin = 0;
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsCulturalAffinityScoreMax = 100;
+
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsDescriptorOverlapScoreMin = 0;
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsDescriptorOverlapScoreMax = 100;
+
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsGeographicSignalScoreMin = 0;
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsGeographicSignalScoreMax = 100;
+
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsVenueReadinessScoreMin = 0;
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsVenueReadinessScoreMax = 100;
+
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsEvidenceCompletenessScoreMin = 0;
+export const analyzeGeographicIntelligenceResponseAnalysisScoresComponentsEvidenceCompletenessScoreMax = 100;
+
+
+
+export const AnalyzeGeographicIntelligenceResponse = zod.object({
+  "summary": zod.object({
+  "requestedBounds": zod.object({
+  "south": zod.number().min(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsSouthMin).max(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsSouthMax),
+  "west": zod.number().min(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsWestMin).max(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsWestMax),
+  "north": zod.number().min(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsNorthMin).max(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsNorthMax),
+  "east": zod.number().min(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsEastMin).max(analyzeGeographicIntelligenceResponseSummaryRequestedBoundsEastMax)
+}),
+  "observedBounds": zod.object({
+  "south": zod.number().min(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneSouthMin).max(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneSouthMax),
+  "west": zod.number().min(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneWestMin).max(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneWestMax),
+  "north": zod.number().min(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneNorthMin).max(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneNorthMax),
+  "east": zod.number().min(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneEastMin).max(analyzeGeographicIntelligenceResponseSummaryObservedBoundsOneEastMax)
+}).nullable(),
+  "heatmap": zod.object({
+  "status": zod.enum(['returned', 'empty', 'unavailable']),
+  "source": zod.enum(['Qloo Insights API']),
+  "pointCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryHeatmapPointCountMin),
+  "duplicateCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryHeatmapDuplicateCountMin),
+  "invalidCoordinateCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryHeatmapInvalidCoordinateCountMin),
+  "points": zod.array(zod.object({
+  "latitude": zod.number(),
+  "longitude": zod.number(),
+  "affinity": zod.number().optional(),
+  "affinityRank": zod.number().optional(),
+  "popularity": zod.number().optional()
+}))
+}),
+  "venues": zod.object({
+  "status": zod.enum(['returned', 'empty', 'unavailable']),
+  "source": zod.enum(['Overture Maps Places', 'OpenStreetMap', 'mixed']),
+  "recordCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryVenuesRecordCountMin),
+  "duplicateCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryVenuesDuplicateCountMin),
+  "invalidCoordinateCount": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryVenuesInvalidCoordinateCountMin),
+  "categoryCounts": zod.array(zod.object({
+  "category": zod.string(),
+  "count": zod.number().int().min(analyzeGeographicIntelligenceResponseSummaryVenuesCategoryCountsItemCountMin)
+})),
+  "records": zod.array(zod.object({
+  "provider": zod.enum(['openstreetmap', 'overture']),
+  "providerVenueId": zod.string().min(1),
+  "name": zod.string().min(1),
+  "latitude": zod.number().min(analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLatitudeMin).max(analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLatitudeMax),
+  "longitude": zod.number().min(analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLongitudeMin).max(analyzeGeographicIntelligenceResponseSummaryVenuesRecordsItemLongitudeMax),
+  "address": zod.string().optional(),
+  "categories": zod.array(zod.string()),
+  "website": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "rating": zod.number().optional(),
+  "ratingCount": zod.number().int().optional(),
+  "openingHours": zod.string().optional(),
+  "sourceMetadata": zod.object({
+  "basicCategory": zod.string().optional(),
+  "taxonomy": zod.array(zod.string()).optional(),
+  "operatingStatus": zod.string().optional(),
+  "sources": zod.array(zod.object({
+  "dataset": zod.string().optional(),
+  "license": zod.string().optional(),
+  "provider": zod.string().optional(),
+  "recordId": zod.string().optional(),
+  "version": zod.string().optional()
+})).optional()
+}).optional(),
+  "attribution": zod.string(),
+  "retrievedAt": zod.coerce.date()
+}))
+}),
+  "overtureCoverage": zod.object({
+  "status": zod.enum(['covered', 'partial', 'outside', 'unknown']),
+  "bounds": zod.object({
+  "south": zod.number().min(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneSouthMin).max(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneSouthMax),
+  "west": zod.number().min(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneWestMin).max(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneWestMax),
+  "north": zod.number().min(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneNorthMin).max(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneNorthMax),
+  "east": zod.number().min(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneEastMin).max(analyzeGeographicIntelligenceResponseSummaryOvertureCoverageBoundsOneEastMax)
+}).nullable()
+}),
+  "coverage": zod.enum(['complete', 'partial', 'unavailable']),
+  "sourceSeparation": zod.string()
+}),
+  "analysis": zod.object({
+  "version": zod.enum(['opportunity-analysis/1']),
+  "analysisReference": zod.string().uuid(),
+  "candidateId": zod.string(),
+  "candidateName": zod.string(),
+  "affinity": zod.object({
+  "queryStatuses": zod.object({
+  "interestA": zod.enum(['complete', 'partial', 'empty', 'unavailable', 'invalid']),
+  "interestB": zod.enum(['complete', 'partial', 'empty', 'unavailable', 'invalid']),
+  "joint": zod.enum(['complete', 'partial', 'empty', 'unavailable', 'invalid'])
+}),
+  "interestAEvidence": zod.object({
+  "queryStatus": zod.enum(['complete', 'partial', 'empty', 'unavailable', 'invalid']),
+  "inputEntityIds": zod.array(zod.string()),
+  "candidatePresence": zod.enum(['returned', 'not_returned']),
+  "affinityStatus": zod.enum(['returned', 'missing', 'invalid', 'unavailable']),
+  "affinity": zod.number().nullable(),
+  "affinityRankStatus": zod.enum(['returned', 'missing', 'invalid', 'unavailable']),
+  "affinityRank": zod.number().int().nullable(),
+  "sourceReference": zod.string()
+}),
+  "interestBEvidence": zod.object({
+  "queryStatus": zod.enum(['complete', 'partial', 'empty', 'unavailable', 'invalid']),
+  "inputEntityIds": zod.array(zod.string()),
+  "candidatePresence": zod.enum(['returned', 'not_returned']),
+  "affinityStatus": zod.enum(['returned', 'missing', 'invalid', 'unavailable']),
+  "affinity": zod.number().nullable(),
+  "affinityRankStatus": zod.enum(['returned', 'missing', 'invalid', 'unavailable']),
+  "affinityRank": zod.number().int().nullable(),
+  "sourceReference": zod.string()
+}),
+  "jointAffinityStatus": zod.enum(['returned', 'missing', 'invalid', 'unavailable']),
+  "jointAffinity": zod.number().nullable(),
+  "jointAffinityRank": zod.number().int().nullable(),
+  "attributionCoverage": zod.enum(['both_inputs_attributed', 'one_input_attributed', 'no_positive_attribution', 'unavailable', 'invalid', 'partial']),
+  "inputAttributions": zod.array(zod.object({
+  "entityId": zod.string(),
+  "score": zod.number(),
+  "matchesInput": zod.boolean(),
+  "positive": zod.boolean()
+})),
+  "sourceReference": zod.string()
+}),
+  "overlap": zod.object({
+  "status": zod.enum(['complete', 'partial', 'unavailable']),
+  "matchingTags": zod.array(zod.object({
+  "id": zod.string(),
+  "interestAName": zod.string(),
+  "interestBName": zod.string(),
+  "classification": zod.enum(['cultural_domain', 'operational', 'unclassified'])
+})),
+  "interestAOnlyTags": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "classification": zod.enum(['cultural_domain', 'operational', 'unclassified'])
+})),
+  "interestBOnlyTags": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "classification": zod.enum(['cultural_domain', 'operational', 'unclassified'])
+})),
+  "jaccard": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "value": zod.number().nullable(),
+  "reason": zod.union([zod.literal('incomplete_tag_sets'),zod.literal('empty_union'),zod.literal(null)]).nullable(),
+  "intersectionSize": zod.number().int().min(analyzeGeographicIntelligenceResponseAnalysisOverlapJaccardIntersectionSizeMin),
+  "unionSize": zod.number().int().min(analyzeGeographicIntelligenceResponseAnalysisOverlapJaccardUnionSizeMin)
+}),
+  "coverage": zod.object({
+  "interestA": zod.enum(['complete', 'partial', 'unavailable']),
+  "interestB": zod.enum(['complete', 'partial', 'unavailable']),
+  "interestATagCount": zod.number().int().min(analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageInterestATagCountMin),
+  "interestBTagCount": zod.number().int().min(analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageInterestBTagCountMin),
+  "matchingTagCount": zod.number().int().min(analyzeGeographicIntelligenceResponseAnalysisOverlapCoverageMatchingTagCountMin)
+}),
+  "sourceReferences": zod.array(zod.string())
+}),
+  "jointAttribution": zod.object({
+  "status": zod.enum(['attributed', 'unavailable']),
+  "matchedInputEntityIds": zod.array(zod.string()),
+  "sourceReference": zod.string()
+}),
+  "scores": zod.object({
+  "methodologyVersion": zod.enum(['opportunity-components/1']),
+  "components": zod.object({
+  "culturalAffinity": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "score": zod.number().min(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsCulturalAffinityScoreMin).max(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsCulturalAffinityScoreMax).nullable(),
+  "explanation": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "sourceReferences": zod.array(zod.string())
+}),
+  "descriptorOverlap": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "score": zod.number().min(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsDescriptorOverlapScoreMin).max(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsDescriptorOverlapScoreMax).nullable(),
+  "explanation": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "sourceReferences": zod.array(zod.string())
+}),
+  "geographicSignal": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "score": zod.number().min(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsGeographicSignalScoreMin).max(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsGeographicSignalScoreMax).nullable(),
+  "explanation": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "sourceReferences": zod.array(zod.string())
+}),
+  "venueReadiness": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "score": zod.number().min(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsVenueReadinessScoreMin).max(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsVenueReadinessScoreMax).nullable(),
+  "explanation": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "sourceReferences": zod.array(zod.string())
+}),
+  "evidenceCompleteness": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "score": zod.number().min(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsEvidenceCompletenessScoreMin).max(analyzeGeographicIntelligenceResponseAnalysisScoresComponentsEvidenceCompletenessScoreMax).nullable(),
+  "explanation": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "sourceReferences": zod.array(zod.string())
+})
+}),
+  "composite": zod.object({
+  "status": zod.enum(['unavailable']),
+  "score": zod.literal(null).nullable(),
+  "reason": zod.string()
+}),
+  "assumptions": zod.array(zod.string()),
+  "limitations": zod.array(zod.string())
+}),
+  "recommendations": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['cultural_validation', 'venue_option']),
+  "title": zod.string(),
+  "rationale": zod.string(),
+  "evidenceReferences": zod.array(zod.string()),
+  "limitations": zod.array(zod.string())
+}))
+}).optional()
+})
+
+
 export const GetVenueProviderStatusResponse = zod.object({
   "configured": zod.boolean(),
   "state": zod.enum(['reachable', 'unavailable', 'unknown']),
@@ -681,4 +1032,3 @@ export const AssessVenueSuitabilityResponse = zod.object({
 })),
   "missingData": zod.array(zod.string())
 })
-

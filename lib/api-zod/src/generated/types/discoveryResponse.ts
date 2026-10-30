@@ -9,6 +9,7 @@ import type { BridgeCandidate } from './bridgeCandidate';
 import type { DiscoveryResponseSource } from './discoveryResponseSource';
 
 export interface DiscoveryResponse {
+  analysisReference?: string;
   source: DiscoveryResponseSource;
   candidates: BridgeCandidate[];
   caveat: string;

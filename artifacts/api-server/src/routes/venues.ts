@@ -8,21 +8,11 @@ import {
 } from "@workspace/api-zod";
 import { getVenueSourceStatus } from "../lib/venue-source";
 import { openStreetMapVenueProvider, OverpassRequestError } from "../lib/openstreetmap";
-import { overtureVenueProvider, OvertureDataUnavailableError } from "../lib/overture";
-import type { VenueProvider } from "../lib/venue-provider";
+import { OvertureDataUnavailableError, overtureVenueProvider } from "../lib/overture";
+import { searchPrimaryVenues } from "../lib/venue-discovery";
 import { assessVenueSuitability } from "../lib/venue-suitability";
 
 const router: IRouter = Router();
-
-async function searchPrimaryVenues(input: Parameters<VenueProvider["search"]>[0]) {
-  try {
-    return { provider: "overture" as const, venues: await overtureVenueProvider.search(input) };
-  } catch (error) {
-    if (!(error instanceof OvertureDataUnavailableError)) throw error;
-    if (!process.env.OVERPASS_URL?.trim()) throw error;
-    return { provider: "openstreetmap" as const, venues: await openStreetMapVenueProvider.search(input) };
-  }
-}
 
 function logVenueProviderFailure(req: Request, error: unknown) {
   if (error instanceof OverpassRequestError) {

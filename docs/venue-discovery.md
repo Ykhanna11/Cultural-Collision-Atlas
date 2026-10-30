@@ -40,16 +40,22 @@ saved snapshots, and JSON exports. Older single-venue plans remain supported.
 
 ## Map Tiles and Terms
 
-The current map uses
-`https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png` and visibly attributes
-`© OpenStreetMap contributors`. OSM data is free to use under ODbL attribution
-requirements, but the public tile service is donation-funded, best-effort, and
-not a commercial SaaS service guarantee. Follow the [OSMF tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
-honor HTTP caching, do not prefetch or provide offline tiles from this service,
-and keep attribution visible. OSMF may block access or withdraw it. Commercial
-production should select a provider or self-hosted tile source with terms and
-capacity suitable for the deployment; do not assume public tiles are
-unrestricted.
+The Opportunity Atlas uses the no-key OpenFreeMap vector style
+`https://tiles.openfreemap.org/styles/dark` through MapLibre GL JS. The public
+OpenFreeMap instance is free and does not require registration or API keys, but
+its [Terms of Service](https://openfreemap.org/tos/) describe it as an
+as-is/as-available service that may be discontinued without notice. It does not
+provide an availability guarantee. The browser requests style, vector tiles,
+sprites, and glyphs only as needed for interactive map rendering; the app does
+not proxy, prefetch, bulk-download, or retain basemap tiles.
+
+MapLibre's visible attribution control identifies OpenFreeMap, OpenMapTiles, and
+OpenStreetMap contributors. The OpenStreetMap data remains under ODbL; see the
+[OpenFreeMap quick start](https://openfreemap.org/quick_start/) and
+[OpenStreetMap copyright page](https://www.openstreetmap.org/copyright). The
+previous `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png` basemap has been
+removed. The public OSM tile service is separate from OSM's data license and must
+not be treated as an unrestricted tile CDN.
 
 Overture records may have source-specific licenses and notices. Preserve the
 attribution and license metadata with saved/exported venue facts, review each

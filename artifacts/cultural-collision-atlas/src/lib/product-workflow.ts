@@ -4,16 +4,27 @@ import type {
   DiscoveryResponse,
   ActivationStrategy,
   ActivationPlannerResponse,
+  GeographicAnalysisResponse,
 } from "@workspace/api-client-react";
 
 export interface ActivationPlanDraft {
   form: DiscoveryInput;
   candidate: BridgeCandidate;
   response: DiscoveryResponse;
+  geographicAnalysis?: GeographicAnalysisSnapshot;
   venue?: ActivationPlanVenue;
   venues?: ActivationPlanVenue[];
   venueSuitabilities?: Record<string, VenueSuitabilityContext>;
   venueSuitability?: VenueSuitabilityContext;
+}
+
+export interface GeographicAnalysisSnapshot {
+  version: "geographic-intelligence/1";
+  analysisReference?: string;
+  city: string;
+  entityId: string;
+  summary: GeographicAnalysisResponse["summary"];
+  analysis?: GeographicAnalysisResponse["analysis"];
 }
 
 export interface ActivationPlanVenue {
@@ -87,6 +98,7 @@ export function buildDiscoverySaveInput(
   candidate: BridgeCandidate,
   venues: ActivationPlanVenue[] = [],
   venueSuitabilities: Record<string, VenueSuitabilityContext> = {},
+  geographicAnalysis?: GeographicAnalysisSnapshot,
 ) {
   const selectedVenues = venues.map((venue) => ({
     ...venue,
@@ -103,14 +115,29 @@ export function buildDiscoverySaveInput(
       source: response.source,
       generatedAt: response.generatedAt,
       caveat: response.caveat,
+      discoveryInput: form,
+      ...(response.analysisReference && { analysisReference: response.analysisReference }),
       selectedBridge: candidate,
       ...(selectedVenues.length > 0 && { selectedVenues }),
+      ...(geographicAnalysis && { geographicAnalysis }),
     },
   };
 }
 
 export function buildActivationPlanContent(draft: ActivationPlanDraft) {
   const venues = venuesForDraft(draft);
+  const analysis = draft.geographicAnalysis?.analysis;
+  const componentEvidence = analysis
+    ? Object.entries(analysis.scores.components)
+        .map(([name, component]) =>
+          `${name}: ${component.status === "available"
+            ? `${component.score}/100; ${component.explanation}`
+            : `unavailable; ${component.reason}`}${component.sourceReferences.length
+            ? `; sources: ${component.sourceReferences.join(", ")}`
+            : ""}`,
+        )
+        .join(" | ")
+    : "Component analysis was unavailable.";
   return {
     sections: [
       {
@@ -161,6 +188,12 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
         title: "Audience-interest test",
         content: `Run a small, opt-in concept test with people who self-identify as interested in ${draft.form.interestA}, ${draft.form.interestB}, or both. Show a neutral ${draft.candidate.name} experience concept, measure stated relevance, and record how the sample was recruited. Stated interest is not a forecast of attendance or campaign performance.`,
       },
+      ...(draft.geographicAnalysis
+        ? [{
+            title: "Geographic evidence · provider observations",
+            content: `Version ${draft.geographicAnalysis.version}. Qloo returned ${draft.geographicAnalysis.summary.heatmap.pointCount} heatmap points (${draft.geographicAnalysis.summary.heatmap.status}); ${draft.geographicAnalysis.summary.venues.recordCount} venue records from ${draft.geographicAnalysis.summary.venues.source} (${draft.geographicAnalysis.summary.venues.status}). Overture extract coverage: ${draft.geographicAnalysis.summary.overtureCoverage.status}. Qloo cultural signals and venue records remain separate entities. ${analysis ? `Methodology ${analysis.scores.methodologyVersion}. Components: ${componentEvidence}. Composite score: unavailable because no approved weights or thresholds exist. Deterministic recommendations: ${analysis.recommendations.map(({ title, rationale, evidenceReferences, limitations }) => `${title}: ${rationale} Evidence: ${evidenceReferences.join(", ")}. Limitations: ${limitations.join("; ")}`).join(" | ")}` : componentEvidence}`,
+          }]
+        : []),
     ],
     planningEstimates: {
       budgetRange: draft.form.budgetRange,
@@ -175,6 +208,9 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
       "No venue, partner, permit, or supplier quote has been confirmed.",
       "Costs, attendance, and campaign outcomes are not estimates or guarantees.",
     ],
+    ...(draft.geographicAnalysis && {
+      geographicAnalysis: draft.geographicAnalysis,
+    }),
   };
 }
 
@@ -283,6 +319,9 @@ export function buildActivationPlanSaveInput(
   const strategySections = agentResult
     ? buildActivationStrategySections(agentResult.strategy)
     : [];
+  const geographicSection = draft.geographicAnalysis
+    ? plan.sections.find(({ title }) => title === "Geographic evidence · provider observations")
+    : undefined;
   const selectedVenueSection = buildSelectedVenueSection(draft);
   const venues = venuesForDraft(draft);
   const selectedVenues = venues.map((venue, index) => ({
@@ -301,7 +340,11 @@ export function buildActivationPlanSaveInput(
     plan: {
       ...plan,
       sections: aiGenerated
-        ? [...strategySections, ...(selectedVenueSection ? [selectedVenueSection] : [])]
+        ? [
+            ...strategySections,
+            ...(geographicSection ? [geographicSection] : []),
+            ...(selectedVenueSection ? [selectedVenueSection] : []),
+          ]
         : [...plan.sections, ...(selectedVenueSection ? [selectedVenueSection] : [])],
       ...(selectedVenues.length > 0 && {
         selectedVenue: selectedVenues[0],
@@ -325,9 +368,13 @@ export function buildActivationPlanSaveInput(
 
 export interface SavedDiscoveryDetails {
   candidate: BridgeCandidate | null;
+  input: DiscoveryInput | null;
+  generatedAt: string | null;
+  analysisReference: string | null;
   source: string | null;
   caveat: string | null;
   venues: ActivationPlanVenue[];
+  geographicAnalysis?: GeographicAnalysisSnapshot;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -349,12 +396,29 @@ function isBridgeCandidate(value: unknown): value is BridgeCandidate {
   );
 }
 
+function isDiscoveryInput(value: unknown): value is DiscoveryInput {
+  return (
+    isRecord(value) &&
+    typeof value.interestA === "string" &&
+    typeof value.interestAId === "string" &&
+    typeof value.interestB === "string" &&
+    typeof value.interestBId === "string" &&
+    typeof value.city === "string" &&
+    typeof value.activationType === "string" &&
+    typeof value.budgetRange === "string" &&
+    typeof value.objective === "string"
+  );
+}
+
 export function getSavedDiscoveryDetails(
   value: unknown,
 ): SavedDiscoveryDetails {
   const result = isRecord(value) ? value : {};
   const candidate = isBridgeCandidate(result.selectedBridge)
     ? result.selectedBridge
+    : null;
+  const input = isDiscoveryInput(result.discoveryInput)
+    ? result.discoveryInput
     : null;
   const venues = Array.isArray(result.selectedVenues)
     ? result.selectedVenues.filter((venue): venue is ActivationPlanVenue =>
@@ -367,10 +431,60 @@ export function getSavedDiscoveryDetails(
         typeof venue.attribution === "string",
       ) as ActivationPlanVenue[]
     : [];
+  const parsedGeographicAnalysis = isGeographicAnalysisSnapshot(
+    result.geographicAnalysis,
+    candidate?.id,
+  )
+    ? result.geographicAnalysis
+    : undefined;
+  const geographicAnalysis = parsedGeographicAnalysis &&
+    (result.analysisReference === undefined ||
+      parsedGeographicAnalysis.analysisReference === result.analysisReference)
+    ? parsedGeographicAnalysis
+    : undefined;
   return {
     candidate,
+    input,
+    generatedAt: typeof result.generatedAt === "string" ? result.generatedAt : null,
+    analysisReference:
+      typeof result.analysisReference === "string" ? result.analysisReference : null,
     source: typeof result.source === "string" ? result.source : null,
     caveat: typeof result.caveat === "string" ? result.caveat : null,
     venues,
+    ...(geographicAnalysis && { geographicAnalysis }),
   };
+}
+
+export function isGeographicAnalysisSnapshot(
+  value: unknown,
+  expectedEntityId?: string,
+): value is GeographicAnalysisSnapshot {
+  if (!isRecord(value) || !isRecord(value.summary)) return false;
+  if (
+    value.version !== "geographic-intelligence/1" ||
+    typeof value.city !== "string" ||
+    typeof value.entityId !== "string" ||
+    (expectedEntityId !== undefined && value.entityId !== expectedEntityId)
+  ) {
+    return false;
+  }
+  const summary = value.summary;
+  const validSummary = (
+    isRecord(summary.heatmap) && Array.isArray(summary.heatmap.points) &&
+    isRecord(summary.venues) && Array.isArray(summary.venues.records) &&
+    isRecord(summary.requestedBounds)
+  );
+  if (!validSummary) return false;
+  if (value.analysisReference !== undefined && typeof value.analysisReference !== "string") return false;
+  if (value.analysis === undefined) return true;
+  if (!isRecord(value.analysis)) return false;
+  return (
+    value.analysis.version === "opportunity-analysis/1" &&
+    typeof value.analysis.analysisReference === "string" &&
+    value.analysis.analysisReference === value.analysisReference &&
+    value.analysis.candidateId === value.entityId &&
+    isRecord(value.analysis.scores) &&
+    isRecord(value.analysis.overlap) &&
+    Array.isArray(value.analysis.recommendations)
+  );
 }

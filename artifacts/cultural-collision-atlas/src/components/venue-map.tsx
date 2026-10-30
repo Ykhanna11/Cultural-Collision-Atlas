@@ -1,6 +1,29 @@
-import { useEffect, useRef } from "react";
-import L from "leaflet";
+import { useEffect, useRef, useState } from "react";
+import {
+  AttributionControl,
+  LngLatBounds,
+  Map as MapLibreMap,
+  Marker,
+  NavigationControl,
+  Popup,
+  setWorkerUrl,
+} from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+import "maplibre-gl/dist/maplibre-gl.css";
 import type { Venue } from "@workspace/api-client-react";
+import { BasemapUnavailableNotice } from "@/components/basemap-unavailable-notice";
+import {
+  BASEMAP_ATTRIBUTION_HTML,
+  OPENFREEMAP_STYLE_URL,
+  shouldFallbackFromBasemapError,
+} from "@/lib/map-config";
+import {
+  bindVenueMarkerSelection,
+  venueMarkerModels,
+  venuePopupDetails,
+} from "@/lib/venue-map-model";
+
+setWorkerUrl(workerUrl);
 
 export interface VenueMapBounds {
   south: number;
@@ -17,6 +40,36 @@ interface VenueMapProps {
   onBoundsChange: (bounds: VenueMapBounds) => void;
   fitRequest: number;
 }
+function markerPopup(venue: Venue): HTMLElement {
+  const details = venuePopupDetails(venue);
+  const content = document.createElement("div");
+  content.className = "venue-map-popup";
+
+  const title = document.createElement("strong");
+  title.textContent = details.name;
+  content.append(title);
+
+  for (const [label, value] of [
+    ["Category", details.categories],
+    ["Address", details.address],
+    ["Coordinates", details.coordinates],
+    ["Provider ID", details.providerId],
+    ["Source", details.attribution],
+  ]) {
+    const row = document.createElement("span");
+    row.textContent = `${label}: ${value}`;
+    content.append(row);
+  }
+  return content;
+}
+
+function errorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return undefined;
+  }
+  const status = error.status;
+  return typeof status === "number" ? status : undefined;
+}
 
 export function VenueMap({
   venues,
@@ -27,25 +80,53 @@ export function VenueMap({
   fitRequest,
 }: VenueMapProps) {
   const elementRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const markersRef = useRef<Map<string, Marker>>(new Map());
   const ignoreNextMoveEndRef = useRef(false);
   const onSelectRef = useRef(onSelect);
   const onBoundsChangeRef = useRef(onBoundsChange);
+  const [basemapUnavailable, setBasemapUnavailable] = useState(false);
   onSelectRef.current = onSelect;
   onBoundsChangeRef.current = onBoundsChange;
 
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
-    const map = L.map(elementRef.current, {
-      center: [51.5, -0.125],
+    const map = new MapLibreMap({
+      container: elementRef.current,
+      style: OPENFREEMAP_STYLE_URL,
+      center: [-0.125, 51.5],
       zoom: 14,
-      scrollWheelZoom: true,
-    });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
       maxZoom: 19,
-    }).addTo(map);
+      attributionControl: false,
+    });
+    map.addControl(new NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(
+      new AttributionControl({
+        compact: false,
+        customAttribution: BASEMAP_ATTRIBUTION_HTML,
+      }),
+      "bottom-right",
+    );
+
+    let fallbackTriggered = false;
+    const fallbackToPlainCanvas = () => {
+      if (fallbackTriggered) return;
+      fallbackTriggered = true;
+      window.clearTimeout(fallbackTimer);
+      setBasemapUnavailable(true);
+      map.setStyle({
+        version: 8,
+        sources: {},
+        layers: [
+          {
+            id: "basemap-unavailable-background",
+            type: "background",
+            paint: { "background-color": "#0b101b" },
+          },
+        ],
+      });
+    };
+    const fallbackTimer = window.setTimeout(fallbackToPlainCanvas, 15000);
     const publishBounds = () => {
       if (ignoreNextMoveEndRef.current) {
         ignoreNextMoveEndRef.current = false;
@@ -59,17 +140,29 @@ export function VenueMap({
         east: bounds.getEast(),
       });
     };
+
     map.on("moveend", publishBounds);
-    map.whenReady(publishBounds);
+    map.once("load", () => {
+      window.clearTimeout(fallbackTimer);
+      if (!fallbackTriggered) publishBounds();
+    });
+    map.on("error", (event) => {
+      if (shouldFallbackFromBasemapError(errorStatus(event.error))) {
+        fallbackToPlainCanvas();
+      }
+    });
     mapRef.current = map;
-    const invalidateSize = () => map.invalidateSize({ pan: false });
+
+    const invalidateSize = () => map.resize();
     const resizeObserver = new ResizeObserver(invalidateSize);
     resizeObserver.observe(elementRef.current);
     window.addEventListener("orientationchange", invalidateSize);
     return () => {
+      window.clearTimeout(fallbackTimer);
       resizeObserver.disconnect();
       window.removeEventListener("orientationchange", invalidateSize);
-      map.off();
+      for (const marker of markersRef.current.values()) marker.remove();
+      markersRef.current.clear();
       map.remove();
       mapRef.current = null;
     };
@@ -81,46 +174,62 @@ export function VenueMap({
     for (const marker of markersRef.current.values()) marker.remove();
     markersRef.current.clear();
 
-    const seen = new Set<string>();
-    for (const venue of venues) {
-      if (seen.has(venue.providerVenueId)) continue;
-      seen.add(venue.providerVenueId);
-      const selected = venue.providerVenueId === selectedVenueId || selectedVenueIds.includes(venue.providerVenueId);
-      const marker = L.marker([venue.latitude, venue.longitude], {
-        icon: L.divIcon({
-          className: "venue-map-marker",
-          html: `<span class="${selected ? "venue-map-marker-selected" : ""}"></span>`,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-        }),
-        title: venue.name,
-      }).addTo(map);
-      marker.on("click", () => onSelectRef.current(venue));
-      markersRef.current.set(venue.providerVenueId, marker);
+    for (const model of venueMarkerModels(
+      venues,
+      selectedVenueId,
+      selectedVenueIds,
+    )) {
+      const markerElement = document.createElement("button");
+      markerElement.type = "button";
+      markerElement.className = model.className;
+      markerElement.setAttribute("aria-label", model.accessibleLabel);
+      markerElement.title = model.accessibleLabel;
+      const markerDot = document.createElement("span");
+      markerDot.setAttribute("aria-hidden", "true");
+      markerElement.append(markerDot);
+
+      const popup = new Popup({
+        closeButton: true,
+        closeOnClick: true,
+        offset: 16,
+      }).setDOMContent(markerPopup(model.venue));
+      const marker = new Marker({ element: markerElement, anchor: "center" })
+        .setLngLat(model.coordinates)
+        .setPopup(popup)
+        .addTo(map);
+      bindVenueMarkerSelection(markerElement, model.venue, (venue) => {
+        onSelectRef.current(venue);
+      });
+      markersRef.current.set(model.providerVenueId, marker);
     }
   }, [venues, selectedVenueId, selectedVenueIds]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || fitRequest === 0 || venues.length === 0) return;
-    const bounds = L.latLngBounds(
-      venues.map((venue) => [venue.latitude, venue.longitude]),
+    const coordinates = venueMarkerModels(venues).map(
+      ({ coordinates }) => coordinates,
     );
-    const paddedBounds = bounds.pad(0.18);
-    if (!map.getBounds().equals(paddedBounds)) {
-      ignoreNextMoveEndRef.current = true;
-      map.once("moveend", () => {
-        ignoreNextMoveEndRef.current = false;
-      });
-      map.fitBounds(paddedBounds, { maxZoom: 16 });
-    }
+    if (coordinates.length === 0) return;
+    const bounds = coordinates.reduce(
+      (current, coordinate) => current.extend(coordinate),
+      new LngLatBounds(coordinates[0], coordinates[0]),
+    );
+    ignoreNextMoveEndRef.current = true;
+    map.once("moveend", () => {
+      ignoreNextMoveEndRef.current = false;
+    });
+    map.fitBounds(bounds, { padding: 28, maxZoom: 16, duration: 0 });
   }, [fitRequest, venues]);
 
   return (
-    <div
-      ref={elementRef}
-      className="h-[420px] w-full rounded-xl bg-[#0b101b] lg:h-[520px]"
-      aria-label="Interactive OpenStreetMap venue map"
-    />
+    <div className="venue-map-shell" data-testid="venue-map-shell">
+      <div
+        ref={elementRef}
+        className="venue-map-canvas"
+        aria-label="Interactive OpenFreeMap venue map"
+      />
+      {basemapUnavailable && <BasemapUnavailableNotice />}
+    </div>
   );
 }

@@ -278,6 +278,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /opportunities/intelligence/analyze:
+    post:
+      operationId: analyzeGeographicIntelligence
+      tags: [opportunities]
+      summary: Analyze bounded Qloo signals and actual venue records
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeographicAnalysisInput"
+      responses:
+        "200":
+          description: Bounded geographic evidence with explicit per-source coverage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeographicAnalysisResponse"
+        "400":
+          description: Invalid or unbounded geographic request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /opportunities/venues/status:
     get:
       operationId: getVenueProviderStatus
@@ -639,6 +663,7 @@ components:
     DiscoveryResponse:
       type: object
       properties:
+        analysisReference: { type: string, format: uuid }
         source: { type: string, enum: [qloo_api] }
         candidates:
           type: array
@@ -711,6 +736,250 @@ components:
           type: array
           items: { $ref: "#/components/schemas/HeatmapPoint" }
       required: [source, points]
+    GeographicAnalysisInput:
+      type: object
+      properties:
+        city: { type: string, minLength: 1, maxLength: 120 }
+        entityId: { type: string, minLength: 1, maxLength: 160 }
+        analysisReference: { type: string, format: uuid }
+        selectedVenueId: { type: string, minLength: 1, maxLength: 160 }
+        bounds: { $ref: "#/components/schemas/VenueBoundingBox" }
+        categories:
+          type: array
+          items:
+            type: string
+            enum: [restaurant, cafe, shopping, entertainment, sports, culture, museum, event_space]
+        query: { type: string, maxLength: 120 }
+        limit: { type: integer, minimum: 1, maximum: 50, default: 25 }
+      required: [city, entityId, bounds]
+    GeographicAnalysisResponse:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/GeographicIntelligenceSummary"
+        analysis:
+          $ref: "#/components/schemas/UnifiedOpportunityAnalysis"
+      required: [summary]
+    GeographicIntelligenceSummary:
+      type: object
+      properties:
+        requestedBounds: { $ref: "#/components/schemas/VenueBoundingBox" }
+        observedBounds:
+          allOf:
+            - $ref: "#/components/schemas/VenueBoundingBox"
+          nullable: true
+        heatmap:
+          type: object
+          properties:
+            status: { type: string, enum: [returned, empty, unavailable] }
+            source: { type: string, enum: [Qloo Insights API] }
+            pointCount: { type: integer, minimum: 0 }
+            duplicateCount: { type: integer, minimum: 0 }
+            invalidCoordinateCount: { type: integer, minimum: 0 }
+            points:
+              type: array
+              items: { $ref: "#/components/schemas/HeatmapPoint" }
+          required: [status, source, pointCount, duplicateCount, invalidCoordinateCount, points]
+        venues:
+          type: object
+          properties:
+            status: { type: string, enum: [returned, empty, unavailable] }
+            source: { type: string, enum: [Overture Maps Places, OpenStreetMap, mixed] }
+            recordCount: { type: integer, minimum: 0 }
+            duplicateCount: { type: integer, minimum: 0 }
+            invalidCoordinateCount: { type: integer, minimum: 0 }
+            categoryCounts:
+              type: array
+              items:
+                type: object
+                properties:
+                  category: { type: string }
+                  count: { type: integer, minimum: 0 }
+                required: [category, count]
+            records:
+              type: array
+              items: { $ref: "#/components/schemas/Venue" }
+          required: [status, source, recordCount, duplicateCount, invalidCoordinateCount, categoryCounts, records]
+        overtureCoverage:
+          type: object
+          properties:
+            status: { type: string, enum: [covered, partial, outside, unknown] }
+            bounds:
+              allOf:
+                - $ref: "#/components/schemas/VenueBoundingBox"
+              nullable: true
+          required: [status, bounds]
+        coverage: { type: string, enum: [complete, partial, unavailable] }
+        sourceSeparation: { type: string }
+      required: [requestedBounds, observedBounds, heatmap, venues, overtureCoverage, coverage, sourceSeparation]
+    OverlapTagDescriptor:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        classification: { type: string, enum: [cultural_domain, operational, unclassified] }
+      required: [id, name, classification]
+    OverlapTagPair:
+      type: object
+      properties:
+        id: { type: string }
+        interestAName: { type: string }
+        interestBName: { type: string }
+        classification: { type: string, enum: [cultural_domain, operational, unclassified] }
+      required: [id, interestAName, interestBName, classification]
+    OpportunityComponent:
+      type: object
+      properties:
+        status: { type: string, enum: [available, unavailable] }
+        score: { type: [number, "null"], minimum: 0, maximum: 100 }
+        explanation: { type: string }
+        reason: { type: string }
+        sourceReferences:
+          type: array
+          items: { type: string }
+      required: [status, score, sourceReferences]
+    AffinityScopeEvidence:
+      type: object
+      properties:
+        queryStatus: { type: string, enum: [complete, partial, empty, unavailable, invalid] }
+        inputEntityIds:
+          type: array
+          items: { type: string }
+        candidatePresence: { type: string, enum: [returned, not_returned] }
+        affinityStatus: { type: string, enum: [returned, missing, invalid, unavailable] }
+        affinity: { type: [number, "null"] }
+        affinityRankStatus: { type: string, enum: [returned, missing, invalid, unavailable] }
+        affinityRank: { type: [integer, "null"] }
+        sourceReference: { type: string }
+      required: [queryStatus, inputEntityIds, candidatePresence, affinityStatus, affinity, affinityRankStatus, affinityRank, sourceReference]
+    OpportunityComponentVector:
+      type: object
+      properties:
+        methodologyVersion: { type: string, enum: [opportunity-components/1] }
+        components:
+          type: object
+          properties:
+            culturalAffinity: { $ref: "#/components/schemas/OpportunityComponent" }
+            descriptorOverlap: { $ref: "#/components/schemas/OpportunityComponent" }
+            geographicSignal: { $ref: "#/components/schemas/OpportunityComponent" }
+            venueReadiness: { $ref: "#/components/schemas/OpportunityComponent" }
+            evidenceCompleteness: { $ref: "#/components/schemas/OpportunityComponent" }
+          required: [culturalAffinity, descriptorOverlap, geographicSignal, venueReadiness, evidenceCompleteness]
+        composite:
+          type: object
+          properties:
+            status: { type: string, enum: [unavailable] }
+            score: { type: [number, "null"], enum: [null] }
+            reason: { type: string }
+          required: [status, score, reason]
+        assumptions:
+          type: array
+          items: { type: string }
+        limitations:
+          type: array
+          items: { type: string }
+      required: [methodologyVersion, components, composite, assumptions, limitations]
+    UnifiedOpportunityAnalysis:
+      type: object
+      properties:
+        version: { type: string, enum: [opportunity-analysis/1] }
+        analysisReference: { type: string, format: uuid }
+        candidateId: { type: string }
+        candidateName: { type: string }
+        affinity:
+          type: object
+          properties:
+            queryStatuses:
+              type: object
+              properties:
+                interestA: { type: string, enum: [complete, partial, empty, unavailable, invalid] }
+                interestB: { type: string, enum: [complete, partial, empty, unavailable, invalid] }
+                joint: { type: string, enum: [complete, partial, empty, unavailable, invalid] }
+              required: [interestA, interestB, joint]
+            interestAEvidence:
+              $ref: "#/components/schemas/AffinityScopeEvidence"
+            interestBEvidence:
+              $ref: "#/components/schemas/AffinityScopeEvidence"
+            jointAffinityStatus: { type: string, enum: [returned, missing, invalid, unavailable] }
+            jointAffinity: { type: [number, "null"] }
+            jointAffinityRank: { type: [integer, "null"] }
+            attributionCoverage: { type: string, enum: [both_inputs_attributed, one_input_attributed, no_positive_attribution, unavailable, invalid, partial] }
+            inputAttributions:
+              type: array
+              items:
+                type: object
+                properties:
+                  entityId: { type: string }
+                  score: { type: number }
+                  matchesInput: { type: boolean }
+                  positive: { type: boolean }
+                required: [entityId, score, matchesInput, positive]
+            sourceReference: { type: string }
+          required: [queryStatuses, interestAEvidence, interestBEvidence, jointAffinityStatus, jointAffinity, jointAffinityRank, attributionCoverage, inputAttributions, sourceReference]
+        overlap:
+          type: object
+          properties:
+            status: { type: string, enum: [complete, partial, unavailable] }
+            matchingTags:
+              type: array
+              items: { $ref: "#/components/schemas/OverlapTagPair" }
+            interestAOnlyTags:
+              type: array
+              items: { $ref: "#/components/schemas/OverlapTagDescriptor" }
+            interestBOnlyTags:
+              type: array
+              items: { $ref: "#/components/schemas/OverlapTagDescriptor" }
+            jaccard:
+              type: object
+              properties:
+                status: { type: string, enum: [available, unavailable] }
+                value: { type: [number, "null"] }
+                reason: { type: [string, "null"], enum: [incomplete_tag_sets, empty_union, null] }
+                intersectionSize: { type: integer, minimum: 0 }
+                unionSize: { type: integer, minimum: 0 }
+              required: [status, value, reason, intersectionSize, unionSize]
+            coverage:
+              type: object
+              properties:
+                interestA: { type: string, enum: [complete, partial, unavailable] }
+                interestB: { type: string, enum: [complete, partial, unavailable] }
+                interestATagCount: { type: integer, minimum: 0 }
+                interestBTagCount: { type: integer, minimum: 0 }
+                matchingTagCount: { type: integer, minimum: 0 }
+              required: [interestA, interestB, interestATagCount, interestBTagCount, matchingTagCount]
+            sourceReferences:
+              type: array
+              items: { type: string }
+          required: [status, matchingTags, interestAOnlyTags, interestBOnlyTags, jaccard, coverage, sourceReferences]
+        jointAttribution:
+          type: object
+          properties:
+            status: { type: string, enum: [attributed, unavailable] }
+            matchedInputEntityIds:
+              type: array
+              items: { type: string }
+            sourceReference: { type: string }
+          required: [status, matchedInputEntityIds, sourceReference]
+        scores:
+          $ref: "#/components/schemas/OpportunityComponentVector"
+        recommendations:
+          type: array
+          items: { $ref: "#/components/schemas/EvidenceDrivenRecommendation" }
+      required: [version, analysisReference, candidateId, candidateName, affinity, overlap, jointAttribution, scores, recommendations]
+    EvidenceDrivenRecommendation:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [cultural_validation, venue_option] }
+        title: { type: string }
+        rationale: { type: string }
+        evidenceReferences:
+          type: array
+          items: { type: string }
+        limitations:
+          type: array
+          items: { type: string }
+      required: [id, kind, title, rationale, evidenceReferences, limitations]
     AtlasOverview:
       type: object
       properties:

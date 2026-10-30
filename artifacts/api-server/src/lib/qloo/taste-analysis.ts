@@ -1,4 +1,10 @@
 import type { EvidenceItem } from "@workspace/api-zod";
+import {
+  compareCulturalTagSets,
+  type CulturalOverlapResult,
+  type CulturalTagClassification,
+  type CulturalTagSet,
+} from "../cultural-intelligence/overlap";
 import { isRecord } from "./client";
 import { requestTasteAnalysis } from "./insights";
 
@@ -8,29 +14,11 @@ interface TasteTag {
   subtype: string | null;
 }
 
-type TasteEvidenceCategory = "cultural_domain" | "operational" | "unclassified";
-
 interface ParsedTags {
   available: boolean;
   complete: boolean;
   tags: TasteTag[];
 }
-
-const CULTURAL_DOMAIN_SUBTYPES = new Set([
-  "urn:tag:genre:brand",
-  "urn:tag:genre:media",
-  "urn:tag:genre:music",
-  "urn:tag:industry:qloo",
-]);
-
-const OPERATIONAL_SUBTYPES = new Set([
-  "urn:tag:category:place",
-  "urn:tag:cost_description:place",
-  "urn:tag:credit_card:place",
-  "urn:tag:genre:place",
-  "urn:tag:hotel_rating:place",
-  "urn:tag:inclusivity:place",
-]);
 
 export interface TasteAnalysisRequestResult {
   payload: unknown | null;
@@ -120,21 +108,98 @@ function parseCandidateTags(value: unknown): ParsedTags {
   return { available: true, complete, tags };
 }
 
-function classifyTagOverlap(
-  tasteTag: TasteTag,
-  candidateTag: TasteTag,
-): TasteEvidenceCategory {
-  if (
-    !tasteTag.subtype ||
-    !candidateTag.subtype ||
-    tasteTag.subtype !== candidateTag.subtype
-  ) {
-    return "unclassified";
+function normalizedTagSet(
+  parsed: ParsedTags,
+  sourceReference: string,
+): CulturalTagSet {
+  return {
+    sourceReference,
+    status: !parsed.available
+      ? "unavailable"
+      : parsed.complete
+        ? "complete"
+        : "partial",
+    tags: parsed.tags,
+  };
+}
+
+export function compareTasteAnalysisInterests(input: {
+  interestA: string;
+  interestAId?: string;
+  tasteAnalysisA: unknown;
+  interestB: string;
+  interestBId?: string;
+  tasteAnalysisB: unknown;
+}): CulturalOverlapResult {
+  return compareCulturalTagSets(
+    normalizedTagSet(
+      parseTasteTags(input.tasteAnalysisA),
+      `Qloo Taste Analysis · ${input.interestAId ?? input.interestA}`,
+    ),
+    normalizedTagSet(
+      parseTasteTags(input.tasteAnalysisB),
+      `Qloo Taste Analysis · ${input.interestBId ?? input.interestB}`,
+    ),
+  );
+}
+
+function overlapValue(
+  result: CulturalOverlapResult,
+  subject: string,
+  rightSetLabel = "candidate",
+): string {
+  if (result.matchingTags.length) {
+    const categories: Array<{
+      category: CulturalTagClassification;
+      label: string;
+    }> = [
+      { category: "cultural_domain", label: "Cultural/domain evidence" },
+      { category: "operational", label: "Generic operational attributes" },
+      { category: "unclassified", label: "Unclassified tags" },
+    ];
+    const categorySummaries = categories.flatMap(({ category, label }) => {
+      const tags = result.matchingTags.filter((tag) => tag.classification === category);
+      return tags.length
+        ? [`${label}: ${tags.map(({ leftName, rightName, id }) =>
+          `"${leftName}" / ${rightSetLabel} tag "${rightName}" (${id})`,
+          ).join(", ")}.`]
+        : [];
+    });
+    const observedCategories = new Set(
+      result.matchingTags.map(({ classification }) => classification),
+    );
+    const status = observedCategories.size > 1
+      ? "Multiple tag categories observed."
+      : observedCategories.has("cultural_domain")
+        ? "Cultural/domain tag overlap observed."
+        : observedCategories.has("operational")
+          ? "Generic operational attribute overlap observed."
+          : "Unclassified tag overlap observed.";
+    const similarity = result.jaccard.status === "available"
+      ? ` Jaccard similarity: ${result.jaccard.value?.toFixed(3)} (${result.jaccard.intersectionSize} shared IDs / ${result.jaccard.unionSize} unique IDs).`
+      : " Jaccard similarity unavailable because tag coverage is incomplete.";
+    return [
+      status,
+      ...categorySummaries,
+      similarity,
+      result.status !== "complete"
+        ? "Additional tag data was incomplete, so the list may be partial."
+        : "",
+      "Exact tag overlap is not proof of a cultural relationship or shared audience.",
+    ].filter(Boolean).join(" ");
   }
-  const subtype = tasteTag.subtype;
-  if (CULTURAL_DOMAIN_SUBTYPES.has(subtype)) return "cultural_domain";
-  if (OPERATIONAL_SUBTYPES.has(subtype)) return "operational";
-  return "unclassified";
+
+  if (result.jaccard.status === "available") {
+    return `No exact tag-ID overlap observed for ${subject} in both complete returned tag lists. Jaccard similarity: 0.000. This is not evidence against a connection.`;
+  }
+  if (result.jaccard.reason === "empty_union") {
+    return `Both complete returned tag sets for ${subject} were empty, so overlap similarity could not be calculated. No conclusion about a connection can be drawn.`;
+  }
+  const unavailable = [
+    ...(result.coverage.leftStatus !== "complete" ? ["the first tag set"] : []),
+    ...(result.coverage.rightStatus !== "complete" ? ["the second tag set"] : []),
+  ];
+  return `Overlap evidence for ${subject} is unavailable or incomplete: ${unavailable.join(" and ")} could not be fully verified. No conclusion about absence of a match can be drawn.`;
 }
 
 function overlapEvidence(
@@ -143,86 +208,43 @@ function overlapEvidence(
   taste: ParsedTags,
   candidate: ParsedTags,
 ): EvidenceItem {
-  const candidateTagsById = new Map(candidate.tags.map((tag) => [tag.id, tag]));
-  const matches = taste.tags.flatMap((tag) => {
-    const candidateTag = candidateTagsById.get(tag.id);
-    return candidateTag
-      ? [
-          {
-            ...tag,
-            category: classifyTagOverlap(tag, candidateTag),
-            candidateName: candidateTag.name,
-          },
-        ]
-      : [];
-  });
-  const dataComplete = taste.complete && candidate.complete;
-  let value: string;
-
-  if (matches.length) {
-    const categories: Array<{
-      category: TasteEvidenceCategory;
-      label: string;
-    }> = [
-      { category: "cultural_domain", label: "Cultural/domain evidence" },
-      { category: "operational", label: "Generic operational attributes" },
-      { category: "unclassified", label: "Unclassified tags" },
-    ];
-    const categorySummaries = categories.flatMap(({ category, label }) => {
-      const categoryTags = matches.filter((tag) => tag.category === category);
-      return categoryTags.length
-        ? [
-            `${label}: ${categoryTags
-              .map(
-                ({ name, candidateName, id }) =>
-                  `"${name}" / candidate tag "${candidateName}" (${id})`,
-              )
-              .join(", ")}.`,
-          ]
-        : [];
-    });
-    const observedCategories = new Set(matches.map(({ category }) => category));
-    const status =
-      observedCategories.size > 1
-        ? "Multiple tag categories observed."
-        : observedCategories.has("cultural_domain")
-          ? "Cultural/domain tag overlap observed."
-          : observedCategories.has("operational")
-            ? "Generic operational attribute overlap observed."
-            : "Unclassified tag overlap observed.";
-    value = [
-      status,
-      ...categorySummaries,
-      dataComplete
-        ? ""
-        : "Additional tag data was incomplete, so the list may be partial.",
-      "Exact tag overlap is not proof of a cultural relationship or shared audience.",
-    ]
-      .filter(Boolean)
-      .join(" ");
-  } else if (taste.available && candidate.available && dataComplete) {
-    value =
-      `No exact tag-ID overlap observed for ${inputName} in the complete ` +
-      "returned Taste Analysis and candidate tag lists. This is not evidence against a connection.";
-  } else {
-    const unavailable = [
-      ...(!taste.available || !taste.complete
-        ? [`${inputLabel} Taste Analysis tags`]
-        : []),
-      ...(!candidate.available || !candidate.complete
-        ? ["candidate tags"]
-        : []),
-    ];
-    value =
-      `Overlap evidence for ${inputName} is unavailable or incomplete: ` +
-      `${unavailable.join(" and ")} could not be fully verified. ` +
-      "No conclusion about absence of a match can be drawn.";
-  }
+  const result = compareCulturalTagSets(
+    normalizedTagSet(taste, `${inputLabel} Taste Analysis`),
+    normalizedTagSet(candidate, "Qloo joint candidate tags"),
+  );
 
   return {
     source: "Qloo Taste Analysis and candidate tags",
     label: `Taste Analysis overlap · ${inputLabel}: ${inputName}`,
-    value,
+    value: overlapValue(result, inputName),
+    kind: "derived",
+  };
+}
+
+export function buildInterestOverlapEvidence(input: {
+  interestA: string;
+  interestAId?: string;
+  tasteAnalysisA: unknown;
+  interestB: string;
+  interestBId?: string;
+  tasteAnalysisB: unknown;
+}): EvidenceItem {
+  const result = compareTasteAnalysisInterests(input);
+  const distinctSummary = [
+    ...(result.leftOnlyTags.length
+      ? [`${input.interestA} only: ${result.leftOnlyTags.map(({ name, id }) => `${name} (${id})`).join(", ")}.`]
+      : []),
+    ...(result.rightOnlyTags.length
+      ? [`${input.interestB} only: ${result.rightOnlyTags.map(({ name, id }) => `${name} (${id})`).join(", ")}.`]
+      : []),
+  ].join(" ");
+  return {
+    source: result.sourceReferences.join("; "),
+    label: "Taste Analysis overlap · Shared input descriptors",
+    value: [
+      overlapValue(result, `${input.interestA} and ${input.interestB}`, input.interestB),
+      distinctSummary,
+    ].filter(Boolean).join(" "),
     kind: "derived",
   };
 }

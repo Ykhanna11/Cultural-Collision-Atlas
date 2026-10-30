@@ -12,6 +12,8 @@ import {
   buildActivationPlanSaveInput,
   buildDiscoverySaveInput,
   getSavedDiscoveryDetails,
+  isGeographicAnalysisSnapshot,
+  type GeographicAnalysisSnapshot,
   type ActivationPlanDraft,
 } from "./product-workflow.ts";
 import type {
@@ -123,12 +125,103 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     audienceDescription: "Local self-identified fans",
   };
   const response: DiscoveryResponse = {
+    analysisReference: "00000000-0000-4000-8000-000000000001",
     source: "qloo_api",
     candidates: ranked,
     caveat,
     generatedAt: new Date("2026-10-22T12:00:00.000Z"),
   };
-  const discoveryPayload = buildDiscoverySaveInput(form, response, candidate);
+  const geographicAnalysis: GeographicAnalysisSnapshot = {
+    version: "geographic-intelligence/1",
+    analysisReference: "00000000-0000-4000-8000-000000000001",
+    city: form.city,
+    entityId: candidate.id,
+    summary: {
+      requestedBounds: { south: 40.7, west: -74.1, north: 40.8, east: -73.9 },
+      observedBounds: null,
+      heatmap: {
+        status: "returned",
+        source: "Qloo Insights API",
+        pointCount: 1,
+        duplicateCount: 0,
+        invalidCoordinateCount: 0,
+        points: [{ latitude: 40.75, longitude: -74, affinity: 0.62 }],
+      },
+      venues: {
+        status: "returned",
+        source: "Overture Maps Places",
+        recordCount: 1,
+        duplicateCount: 0,
+        invalidCoordinateCount: 0,
+        categoryCounts: [{ category: "culture", count: 1 }],
+        records: [],
+      },
+      overtureCoverage: {
+        status: "covered",
+        bounds: { south: 40.6, west: -74.2, north: 40.9, east: -73.8 },
+      },
+      coverage: "complete",
+      sourceSeparation: "Qloo signals and venues are separate entities.",
+    },
+    analysis: {
+      version: "opportunity-analysis/1",
+      analysisReference: "00000000-0000-4000-8000-000000000001",
+      candidateId: candidate.id,
+      candidateName: candidate.name,
+      affinity: {
+        queryStatuses: { interestA: "complete", interestB: "complete", joint: "complete" },
+        jointAffinityStatus: "returned",
+        jointAffinity: 0.74,
+        jointAffinityRank: 1,
+        attributionCoverage: "both_inputs_attributed",
+        inputAttributions: [],
+        sourceReference: "Qloo Insights API",
+      },
+      overlap: {
+        status: "complete",
+        matchingTags: [],
+        interestAOnlyTags: [],
+        interestBOnlyTags: [],
+        jaccard: { status: "available", value: 0, reason: null, intersectionSize: 0, unionSize: 2 },
+        coverage: { interestA: "complete", interestB: "complete", interestATagCount: 1, interestBTagCount: 1, matchingTagCount: 0 },
+        sourceReferences: ["taste:a", "taste:b"],
+      },
+      jointAttribution: {
+        status: "attributed",
+        matchedInputEntityIds: [inputAId, inputBId],
+        sourceReference: "Qloo Insights API",
+      },
+      scores: {
+        methodologyVersion: "opportunity-components/1",
+        components: {
+          culturalAffinity: { status: "available", score: 74, explanation: "Joint affinity scaled for display only.", sourceReferences: ["Qloo Insights API"] },
+          descriptorOverlap: { status: "available", score: 0, explanation: "Exact tag-ID Jaccard scaled for display.", sourceReferences: ["taste:a", "taste:b"] },
+          geographicSignal: { status: "available", score: 62, explanation: "Mean returned heatmap affinity.", sourceReferences: ["Qloo Insights API"] },
+          venueReadiness: { status: "unavailable", score: null, reason: "No venue assessment attached.", sourceReferences: [] },
+          evidenceCompleteness: { status: "available", score: 75, explanation: "Three of four components available.", sourceReferences: ["Qloo Insights API"] },
+        },
+        composite: { status: "unavailable", score: null, reason: "No approved weights." },
+        assumptions: [],
+        limitations: ["No campaign outcomes are predicted."],
+      },
+      recommendations: [{
+        id: `validate-${candidate.id}`,
+        kind: "cultural_validation",
+        title: "Validate the bridge concept",
+        rationale: "An opt-in test is a hypothesis.",
+        evidenceReferences: ["Qloo Insights API"],
+        limitations: ["Aggregate evidence is not individual overlap."],
+      }],
+    },
+  };
+  const discoveryPayload = buildDiscoverySaveInput(
+    form,
+    response,
+    candidate,
+    [],
+    {},
+    geographicAnalysis,
+  );
 
   const savedDiscoveries = new Map<number, typeof discoveryPayload>();
   savedDiscoveries.set(1, discoveryPayload);
@@ -138,6 +231,9 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
   assert.deepEqual(reopenedDiscovery.candidate, candidate);
   assert.equal(reopenedDiscovery.source, "qloo_api");
   assert.equal(reopenedDiscovery.caveat, caveat);
+  assert.deepEqual(reopenedDiscovery.input, form);
+  assert.equal(reopenedDiscovery.analysisReference, response.analysisReference);
+  assert.deepEqual(reopenedDiscovery.geographicAnalysis, geographicAnalysis);
   assert.deepEqual(
     reopenedDiscovery.candidate?.evidence,
     discoveryPayload.result.selectedBridge.evidence,
@@ -147,6 +243,7 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     form,
     candidate,
     response,
+    geographicAnalysis,
     venue: {
       providerVenueId: "node-123",
       name: "Community Hall",
@@ -165,6 +262,12 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     },
   };
   const planContent = buildActivationPlanContent(draft);
+  assert.deepEqual(planContent.geographicAnalysis, geographicAnalysis);
+  assert.ok(planContent.sections.some(({ title }) => title.startsWith("Geographic evidence")));
+  assert.match(
+    planContent.sections.find(({ title }) => title.startsWith("Geographic evidence"))?.content ?? "",
+    /Validate the bridge concept/,
+  );
   const planPayload = buildActivationPlanSaveInput(
     "New York cultural bridge",
     draft,
@@ -208,6 +311,12 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     exportPayload.plan.selectedVenue,
     planPayload.plan.selectedVenue,
   );
+  assert.deepEqual(exportPayload.plan.geographicAnalysis, geographicAnalysis);
+  assert.equal(isGeographicAnalysisSnapshot(geographicAnalysis, "unrelated-entity"), false);
+  assert.equal(isGeographicAnalysisSnapshot({
+    ...geographicAnalysis,
+    analysis: { ...geographicAnalysis.analysis, candidateId: "unrelated-entity" },
+  }, candidate.id), false);
   assert.equal(
     exportPayload.plan.selectedVenue.suitability.evidence[0]?.label,
     "Venue category",

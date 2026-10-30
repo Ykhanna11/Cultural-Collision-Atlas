@@ -1,7 +1,9 @@
-import { isRecord } from "./qloo/client";
 import { isQlooEntityId } from "./qloo/entities";
 import type { QlooRecommendationType } from "./qloo/insights";
-import { buildTasteAnalysisEvidence } from "./qloo/taste-analysis";
+import {
+  buildInterestOverlapEvidence,
+  buildTasteAnalysisEvidence,
+} from "./qloo/taste-analysis";
 import {
   compareQlooAffinityQueries,
   describeAffinityScopeComparison,
@@ -16,9 +18,6 @@ import type {
 interface RankedEntity {
   id: string;
   name: string;
-  affinity: number | null;
-  affinityRank: number | null;
-  explainability: unknown;
   localityCityEntityId: string | null;
   tags: unknown;
   affinityEvidence: NormalizedAffinityEvidence;
@@ -32,20 +31,17 @@ interface InputAttribution {
 
 type AttributionStrength = "two_sided" | "one_sided" | "unavailable";
 
-function readRankedEntities(query: NormalizedAffinityQuery): RankedEntity[] {
+function assertRecognizedQueryShape(query: NormalizedAffinityQuery): void {
   if (query.status === "invalid" && query.invalidCandidateCount === 0) {
     throw new Error("Qloo insights returned an unrecognized entity result shape.");
   }
+}
+
+function readRankedEntities(query: NormalizedAffinityQuery): RankedEntity[] {
+  assertRecognizedQueryShape(query);
   return query.evidence.map((evidence): RankedEntity => ({
     id: evidence.candidate.entityId,
     name: evidence.candidate.name,
-    affinity: evidence.providerValues.affinity.state === "returned"
-      ? evidence.providerValues.affinity.value
-      : null,
-    affinityRank: evidence.providerValues.affinityRank.state === "returned"
-      ? evidence.providerValues.affinityRank.value
-      : null,
-    explainability: evidence.explainability.providerValue,
     tags: evidence.candidate.tags,
     localityCityEntityId: evidence.candidate.localityCityEntityId,
     affinityEvidence: evidence,
@@ -74,22 +70,33 @@ export function localityStatusForCandidate(
     : "outside_selected_city";
 }
 
-function scoreFromQlooSignals(item: RankedEntity): number {
-  if (item.affinity !== null) return Math.round(item.affinity * 100);
-  if (item.affinityRank !== null) {
-    return Math.round(100 / item.affinityRank);
+function scoreFromQlooSignals(evidence: NormalizedAffinityEvidence): number {
+  const { affinity, affinityRank } = evidence.providerValues;
+  if (affinity.state === "returned") return Math.round(affinity.value * 100);
+  if (affinityRank.state === "returned") {
+    return Math.round(100 / affinityRank.value);
   }
   return 0;
 }
 
-function qlooSignals(item: RankedEntity): string[] {
+function describeProviderValue(
+  field: NormalizedAffinityEvidence["providerValues"]["affinity"],
+): string {
+  switch (field.state) {
+    case "returned":
+      return `${field.value} (provider-returned)`;
+    case "missing":
+      return "missing";
+    case "invalid":
+      return "invalid provider value";
+  }
+}
+
+function qlooSignals(evidence: NormalizedAffinityEvidence): string[] {
   return [
-    ...(item.affinityRank === null
-      ? []
-      : [`Qloo affinity rank: ${item.affinityRank}.`]),
-    ...(item.affinity === null
-      ? []
-      : [`Qloo affinity: ${item.affinity}.`]),
+    `Qloo affinity: ${describeProviderValue(evidence.providerValues.affinity)}.`,
+    `Qloo affinity rank: ${describeProviderValue(evidence.providerValues.affinityRank)}.`,
+    `Explainability coverage: ${evidence.explainability.coverage}.`,
   ];
 }
 
@@ -130,7 +137,7 @@ function attributionStrength(
 }
 
 function explainabilitySummary(
-  explainability: unknown,
+  explainability: NormalizedAffinityEvidence["explainability"],
   attributions: InputAttribution[],
 ): string {
   const strength = attributionStrength(attributions);
@@ -141,13 +148,58 @@ function explainabilitySummary(
     const [{ interest, score }] = attributions;
     return `Per-result explainability reports a contribution from ${interest} (${score}) only. Contribution from the other interest is unconfirmed; Qloo may omit lower-impact contributions.`;
   }
-  if (!isRecord(explainability)) {
+  if (explainability.coverage === "unavailable") {
     return "Per-result input attribution was not returned, so contribution from either interest is unconfirmed.";
   }
-  if (!Array.isArray(explainability["signal.interests.entities"])) {
-    return "Qloo returned explainability metadata but no entity-level input attribution; contribution from either interest is unconfirmed.";
+  if (explainability.coverage === "invalid") {
+    return "Qloo returned explainability metadata that could not be normalized, so contribution from either interest is unconfirmed.";
+  }
+  if (explainability.coverage === "partial") {
+    return "Qloo returned incomplete explainability signals, so contribution from either interest is unconfirmed.";
   }
   return "Qloo returned entity-level input attribution but no positive contribution score matched either selected entity; contribution from both interests is unconfirmed.";
+}
+
+function singleInterestEvidence(
+  query: NormalizedAffinityQuery,
+  candidateId: string,
+  interest: string,
+  side: "A" | "B",
+) {
+  const match = query.evidence.find(({ candidate }) => candidate.entityId === candidateId);
+  const label = match
+    ? `Supporting single-interest comparison: ${interest}`
+    : `${side}-only query results`;
+  let value: string;
+
+  if (match) {
+    value = [
+      "Entity was also returned for this interest alone.",
+      `Query scope: ${side}-only.`,
+      ...qlooSignals(match),
+    ].join(" ");
+  } else {
+    switch (query.status) {
+      case "empty":
+        value = `${interest}: the ${side}-only query returned no candidates; supporting results are missing.`;
+        break;
+      case "unavailable":
+        value = `${interest}: the ${side}-only query was unavailable; candidate presence and affinity could not be assessed.`;
+        break;
+      case "invalid":
+        value = `${interest}: the ${side}-only query response was invalid; candidate presence and affinity could not be assessed.`;
+        break;
+      default:
+        value = `${interest}: the candidate was not returned by the ${side}-only query (query status: ${query.status}).`;
+    }
+  }
+
+  return {
+    source: "Qloo Insights API",
+    label,
+    value,
+    kind: "observed_api" as const,
+  };
 }
 
 export function rankBridgeCandidates(input: {
@@ -187,30 +239,24 @@ export function rankBridgeCandidates(input: {
     normalizeQlooAffinityQuery(input.jointResults, queryContext("joint-interest", "joint_interest", [input.interestAId, input.interestBId])),
   ];
   const affinityComparison = compareQlooAffinityQueries(affinityQueries);
-  const interestA = readRankedEntities(affinityQueries[0]);
-  const interestB = readRankedEntities(affinityQueries[1]);
+  assertRecognizedQueryShape(affinityQueries[0]);
+  assertRecognizedQueryShape(affinityQueries[1]);
   const joint = readRankedEntities(affinityQueries[2]);
   const categoryLabel = recommendationTypeLabel(input.recommendationType);
-  const byIdB = new Map(interestB.map((entity) => [entity.id, entity]));
-  const byIdA = new Map(interestA.map((entity) => [entity.id, entity]));
   const seen = new Set<string>();
 
   return joint.flatMap((candidate) => {
     if (seen.has(candidate.id)) return [];
     seen.add(candidate.id);
 
-    const independentMatches = [
-      [input.interestA, byIdA.get(candidate.id)],
-      [input.interestB, byIdB.get(candidate.id)],
-    ] as const;
-    const score = scoreFromQlooSignals(candidate);
+    const score = scoreFromQlooSignals(candidate.affinityEvidence);
     const inputAttributions = readInputAttribution(candidate.affinityEvidence, [
       { id: input.interestAId, name: input.interestA },
       { id: input.interestBId, name: input.interestB },
     ]);
     const strength = attributionStrength(inputAttributions);
     const attribution = explainabilitySummary(
-      candidate.explainability,
+      candidate.affinityEvidence.explainability,
       inputAttributions,
     );
     const confidence =
@@ -244,22 +290,11 @@ export function rankBridgeCandidates(input: {
         {
           source: "Qloo Insights API",
           label: `Joint-interest comparison · ${categoryLabel}`,
-          value: [`${categoryLabel} returned for a request using both input interests.`, ...qlooSignals(candidate)].join(" "),
+          value: [`${categoryLabel} returned for a request using both input interests.`, ...qlooSignals(candidate.affinityEvidence)].join(" "),
           kind: "observed_api" as const,
         },
-        ...independentMatches.flatMap(([interest, match]) =>
-          match
-            ? [{
-                source: "Qloo Insights API",
-                label: `Supporting single-interest comparison: ${interest}`,
-                value: [
-                  "Entity was also returned for this interest alone.",
-                  ...qlooSignals(match),
-                ].join(" "),
-                kind: "observed_api" as const,
-              }]
-            : [],
-        ),
+        singleInterestEvidence(affinityQueries[0], candidate.id, input.interestA, "A"),
+        singleInterestEvidence(affinityQueries[1], candidate.id, input.interestB, "B"),
         {
           source: "Qloo Insights API",
           label: "Affinity by query scope",
@@ -280,13 +315,23 @@ export function rankBridgeCandidates(input: {
           kind: "derived" as const,
         },
         ...(input.tasteAnalysis
-          ? buildTasteAnalysisEvidence({
-              candidateTags: candidate.tags,
-              interestA: input.interestA,
-              tasteAnalysisA: input.tasteAnalysis.interestA,
-              interestB: input.interestB,
-              tasteAnalysisB: input.tasteAnalysis.interestB,
-            })
+          ? [
+              buildInterestOverlapEvidence({
+                interestA: input.interestA,
+                interestAId: input.interestAId,
+                tasteAnalysisA: input.tasteAnalysis.interestA,
+                interestB: input.interestB,
+                interestBId: input.interestBId,
+                tasteAnalysisB: input.tasteAnalysis.interestB,
+              }),
+              ...buildTasteAnalysisEvidence({
+                candidateTags: candidate.tags,
+                interestA: input.interestA,
+                tasteAnalysisA: input.tasteAnalysis.interestA,
+                interestB: input.interestB,
+                tasteAnalysisB: input.tasteAnalysis.interestB,
+              }),
+            ]
           : []),
       ],
       attributionStrength: strength,

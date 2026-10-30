@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
 import {
   GetAtlasOverviewResponse,
+  AnalyzeGeographicIntelligenceBody,
+  AnalyzeGeographicIntelligenceResponse,
   GetOpportunityHeatmapBody,
   GetOpportunityHeatmapResponse,
   GetQlooStatusResponse,
@@ -19,14 +21,179 @@ import {
 } from "../lib/qloo/client";
 import { searchQlooEntities } from "../lib/qloo/entities";
 import { requestQlooHeatmap } from "../lib/qloo/heatmap";
+import { summarizeGeographicIntelligence } from "../lib/cultural-intelligence/geographic";
+import {
+  analyzeUnifiedOpportunity,
+} from "../lib/cultural-intelligence/analyze";
+import {
+  cacheGeographicAnalysis,
+  getCachedDiscoveryAnalysis,
+  getCachedGeographicAnalysis,
+} from "../lib/cultural-intelligence/analysis-cache";
 import { getVenueSourceStatus } from "../lib/venue-source";
 import { providerRateLimit } from "../lib/provider-rate-limit";
+import { readOvertureCoverage, overtureDataDirectory } from "../lib/overture";
+import { searchPrimaryVenues } from "../lib/venue-discovery";
+import { assessVenueSuitability } from "../lib/venue-suitability";
 import {
   getPublicDemoWorkspaceId,
   workspaceFilter,
 } from "../lib/workspace-scope";
 
 const router: IRouter = Router();
+
+router.post(
+  "/opportunities/intelligence/analyze",
+  providerRateLimit,
+  async (req, res): Promise<void> => {
+    const parsed = AnalyzeGeographicIntelligenceBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { bounds } = parsed.data;
+    if (
+      bounds.south >= bounds.north || bounds.west >= bounds.east ||
+      bounds.north - bounds.south > 2 || bounds.east - bounds.west > 3
+    ) {
+      res.status(400).json({
+        error: "Geographic analysis requires ordered bounds no larger than 2 degrees latitude and 3 degrees longitude.",
+      });
+      return;
+    }
+    if (parsed.data.selectedVenueId && !parsed.data.analysisReference) {
+      res.status(400).json({
+        error: "Venue readiness requires the originating Discovery analysis reference.",
+      });
+      return;
+    }
+
+    const discoveryLookup = parsed.data.analysisReference
+      ? getCachedDiscoveryAnalysis(parsed.data.analysisReference, parsed.data.entityId)
+      : undefined;
+    if (discoveryLookup && discoveryLookup.status !== "found") {
+      res.status(discoveryLookup.status === "candidate_not_found" ? 400 : 410).json({
+        error: discoveryLookup.status === "candidate_not_found"
+          ? "The selected bridge does not belong to this Discovery analysis."
+          : "The Discovery analysis reference expired or is unavailable. Run Discovery again.",
+      });
+      return;
+    }
+    const discoveryContext = discoveryLookup?.status === "found"
+      ? discoveryLookup.analysis
+      : undefined;
+    if (
+      discoveryContext &&
+      discoveryContext.input.city.trim().toLowerCase() !== parsed.data.city.trim().toLowerCase()
+    ) {
+      res.status(409).json({ error: "The selected city does not match the Discovery analysis." });
+      return;
+    }
+
+    const geographicRequest = {
+      city: parsed.data.city.trim(),
+      entityId: parsed.data.entityId,
+      bounds,
+      categories: parsed.data.categories ?? [],
+      ...(parsed.data.query?.trim() && { query: parsed.data.query.trim() }),
+      limit: parsed.data.limit ?? 25,
+    };
+    let summary = discoveryContext
+      ? getCachedGeographicAnalysis(discoveryContext, geographicRequest)
+      : undefined;
+
+    if (!summary) {
+      const [heatmapResult, venueResult] = await Promise.allSettled([
+        requestQlooHeatmap(parsed.data.city, parsed.data.entityId),
+        searchPrimaryVenues({
+          bbox: bounds,
+          categories: parsed.data.categories ?? [],
+          ...(parsed.data.query?.trim() && { query: parsed.data.query.trim() }),
+          limit: parsed.data.limit ?? 25,
+        }),
+      ]);
+      if (heatmapResult.status === "rejected") {
+        req.log.warn(
+          { error: heatmapResult.reason instanceof Error ? heatmapResult.reason.message : "Unknown Qloo error" },
+          "Geographic Qloo evidence request failed",
+        );
+      }
+      if (venueResult.status === "rejected") {
+        req.log.warn(
+          { error: venueResult.reason instanceof Error ? venueResult.reason.message : "Unknown venue error" },
+          "Geographic venue evidence request failed",
+        );
+      }
+
+      const heatmapPoints = heatmapResult.status === "fulfilled" ? heatmapResult.value : [];
+      const venues = venueResult.status === "fulfilled" ? venueResult.value.venues : [];
+      summary = summarizeGeographicIntelligence({
+        bounds,
+        heatmapStatus: heatmapResult.status === "rejected"
+          ? "unavailable"
+          : heatmapPoints.length ? "returned" : "empty",
+        heatmapPoints,
+        venueStatus: venueResult.status === "rejected"
+          ? "unavailable"
+          : venues.length ? "returned" : "empty",
+        venues,
+        ...(venueResult.status === "fulfilled" && { venueSource: venueResult.value.provider }),
+        overtureCoverage: readOvertureCoverage(overtureDataDirectory()),
+      });
+      if (discoveryContext) {
+        cacheGeographicAnalysis(discoveryContext, geographicRequest, summary);
+      }
+    }
+
+    const analysis = discoveryContext
+      ? (() => {
+          const candidate = discoveryContext.candidates.find(
+            ({ id }) => id === parsed.data.entityId,
+          );
+          const venue = parsed.data.selectedVenueId
+            ? summary.venues.records.find(
+                ({ providerVenueId }) => providerVenueId === parsed.data.selectedVenueId,
+              )
+            : undefined;
+          if (parsed.data.selectedVenueId && !venue) {
+            return null;
+          }
+          const venueReadiness = venue && candidate
+            ? assessVenueSuitability({
+                venue,
+                interestA: discoveryContext.input.interestA,
+                interestB: discoveryContext.input.interestB,
+                bridgeName: candidate.name,
+                categories: parsed.data.categories ?? [],
+                qlooEvidence: candidate.evidence,
+              })
+            : undefined;
+          return analyzeUnifiedOpportunity({
+            context: discoveryContext,
+            candidateId: parsed.data.entityId,
+            geography: summary,
+            ...(venueReadiness && venue && {
+              venueReadiness: {
+                score: venueReadiness.score,
+                sourceReferences: [`${venue.provider}:${venue.providerVenueId}`],
+              },
+            }),
+          });
+        })()
+      : undefined;
+    if (analysis === null) {
+      res.status(400).json({
+        error: "The selected venue is not part of this bounded geographic result.",
+      });
+      return;
+    }
+
+    res.json(AnalyzeGeographicIntelligenceResponse.parse({
+      summary,
+      ...(analysis && { analysis }),
+    }));
+  },
+);
 
 router.get("/qloo/status", (_req, res): void => {
   res.json(GetQlooStatusResponse.parse(getQlooStatus()));

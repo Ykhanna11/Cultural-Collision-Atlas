@@ -77,6 +77,40 @@ test("older or incomplete saved plans return empty details without throwing", ()
   });
 });
 
+test("reopens a versioned geographic analysis snapshot with its matching candidate reference", () => {
+  const snapshot = {
+    version: "geographic-intelligence/1",
+    analysisReference: "00000000-0000-4000-8000-000000000001",
+    city: "London",
+    entityId: "candidate-1",
+    summary: {
+      requestedBounds: { south: 51.4, west: -0.3, north: 51.6, east: 0 },
+      observedBounds: null,
+      heatmap: { status: "empty", points: [] },
+      venues: { status: "empty", records: [] },
+    },
+    analysis: {
+      version: "opportunity-analysis/1",
+      analysisReference: "00000000-0000-4000-8000-000000000001",
+      candidateId: "candidate-1",
+      scores: {},
+      overlap: {},
+      recommendations: [],
+    },
+  };
+  const details = getSavedPlanDetails({ geographicAnalysis: snapshot });
+  assert.deepEqual(details.geographicAnalysis, snapshot);
+  assert.equal(
+    getSavedPlanDetails({
+      geographicAnalysis: {
+        ...snapshot,
+        analysis: { ...snapshot.analysis, candidateId: "unrelated-candidate" },
+      },
+    }).geographicAnalysis,
+    undefined,
+  );
+});
+
 test("saved plan details reopen persisted venue facts and assessment evidence", () => {
   const details = getSavedPlanDetails({
     selectedVenue: {

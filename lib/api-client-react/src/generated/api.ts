@@ -29,6 +29,8 @@ import type {
   EntitySearchInput,
   EntitySearchResponse,
   ErrorResponse,
+  GeographicAnalysisInput,
+  GeographicAnalysisResponse,
   HealthStatus,
   HeatmapInput,
   HeatmapResponse,
@@ -1221,6 +1223,94 @@ export const useGetOpportunityHeatmap = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getGetOpportunityHeatmapMutationOptions(options));
+    }
+
+export const getAnalyzeGeographicIntelligenceUrl = () => {
+
+
+
+
+  return `/api/opportunities/intelligence/analyze`
+}
+
+/**
+ * @summary Analyze bounded Qloo signals and actual venue records
+ */
+export const analyzeGeographicIntelligence = async (geographicAnalysisInput: GeographicAnalysisInput, options?: Parameters<typeof customFetch>[1]): Promise<GeographicAnalysisResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<GeographicAnalysisResponse>(getAnalyzeGeographicIntelligenceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(geographicAnalysisInput)
+  }
+);}
+
+
+
+
+
+export const getAnalyzeGeographicIntelligenceMutationKey = () => ['analyzeGeographicIntelligence'] as const;
+
+export const getAnalyzeGeographicIntelligenceMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeGeographicIntelligence>>, TError,AnalyzeGeographicIntelligenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyzeGeographicIntelligence>>, TError,AnalyzeGeographicIntelligenceMutationVariables, TContext> => {
+
+const mutationKey = getAnalyzeGeographicIntelligenceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyzeGeographicIntelligence>>, AnalyzeGeographicIntelligenceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  analyzeGeographicIntelligence(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyzeGeographicIntelligenceMutationResult = NonNullable<Awaited<ReturnType<typeof analyzeGeographicIntelligence>>>
+    export type AnalyzeGeographicIntelligenceMutationBody = BodyType<GeographicAnalysisInput>
+    export type AnalyzeGeographicIntelligenceMutationError = ErrorType<ErrorResponse>
+    export type AnalyzeGeographicIntelligenceMutationVariables = {data: BodyType<GeographicAnalysisInput>}
+
+    /**
+ * @summary Analyze bounded Qloo signals and actual venue records
+ */
+export const useAnalyzeGeographicIntelligence = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeGeographicIntelligence>>, TError,AnalyzeGeographicIntelligenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof analyzeGeographicIntelligence>>,
+        TError,
+        AnalyzeGeographicIntelligenceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAnalyzeGeographicIntelligenceMutationOptions(options));
     }
 
 export const getGetVenueProviderStatusUrl = () => {
