@@ -16,6 +16,7 @@ export interface VenueSuitabilityInput {
 }
 
 export function assessVenueSuitability(input: VenueSuitabilityInput) {
+  const providerName = input.venue.provider === "overture" ? "Overture Maps Places" : "OpenStreetMap";
   const evidence: VenueSuitabilityEvidence[] = [
     {
       kind: "venue_fact",
@@ -50,7 +51,7 @@ export function assessVenueSuitability(input: VenueSuitabilityInput) {
   evidence.push({
     kind: "geographic_context",
     label: "Geographic evidence",
-    value: "Venue coordinates were returned by OpenStreetMap.",
+    value: `Venue coordinates were returned by ${providerName}.`,
   });
   evidence.push({
     kind: "bridge_evidence",
@@ -82,7 +83,7 @@ export function assessVenueSuitability(input: VenueSuitabilityInput) {
     score,
     scoreLabel: "Operational data completeness and category fit; this score is not a probability of cultural relevance or campaign success",
     explanation:
-      `This venue is associated with ${input.venue.categories.join(", ")} in OpenStreetMap. Its relevance to ${input.interestA} and ${input.interestB} remains a cultural hypothesis and should be validated.`,
+      `This venue is associated with ${input.venue.categories.join(", ") || "no normalized category"} in ${providerName}. Its relevance to ${input.interestA} and ${input.interestB} remains a cultural hypothesis and should be validated.`,
     evidence,
     missingData: evidence
       .filter((item) => item.kind === "missing_data")

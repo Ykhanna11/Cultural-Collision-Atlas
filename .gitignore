@@ -11,6 +11,10 @@ out-tsc
 # dependencies
 node_modules
 
+# Local Overture Maps extracts and generated state
+/data/overture/
+/artifacts/api-server/data/overture/
+
 # IDEs and editors
 /.idea
 .project

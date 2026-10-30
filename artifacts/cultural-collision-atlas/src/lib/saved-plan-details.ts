@@ -14,6 +14,7 @@ export interface SavedPlanDetails {
   sections: SavedPlanSection[];
   evidence: SavedPlanEvidence[];
   selectedVenue: SavedPlanVenue | null;
+  selectedVenues: SavedPlanVenue[];
   source: string | null;
   caveat: string | null;
   assumptions: string[];
@@ -33,6 +34,21 @@ export interface SavedPlanVenue {
   provider: string;
   attribution: string;
   retrievedAt?: string;
+  website?: string;
+  phone?: string;
+  email?: string;
+  sourceMetadata?: {
+    basicCategory?: string;
+    taxonomy?: string[];
+    operatingStatus?: string;
+    sources?: Array<{
+      dataset?: string;
+      license?: string;
+      provider?: string;
+      recordId?: string;
+      version?: string;
+    }>;
+  };
   suitability?: {
     score: number;
     scoreLabel: string;
@@ -65,6 +81,83 @@ function isEvidenceKind(value: unknown): value is SavedPlanEvidence["kind"] {
   );
 }
 
+function parseSavedVenue(value: unknown): SavedPlanVenue | null {
+  if (
+    !isRecord(value) ||
+    !nonEmptyString(value.providerVenueId) ||
+    !nonEmptyString(value.name) ||
+    typeof value.latitude !== "number" ||
+    typeof value.longitude !== "number" ||
+    !Array.isArray(value.categories) ||
+    !nonEmptyString(value.attribution)
+  ) return null;
+
+  const sourceMetadata = isRecord(value.sourceMetadata) ? value.sourceMetadata : null;
+  const sources = sourceMetadata && Array.isArray(sourceMetadata.sources)
+    ? sourceMetadata.sources.flatMap((source) => {
+        if (!isRecord(source)) return [];
+        const fields = ["dataset", "license", "provider", "recordId", "version"] as const;
+        const parsed = Object.fromEntries(fields.flatMap((field) => {
+          const entry = nonEmptyString(source[field]);
+          return entry ? [[field, entry]] : [];
+        }));
+        return Object.keys(parsed).length ? [parsed] : [];
+      })
+    : undefined;
+  const suitability = isRecord(value.suitability) ? value.suitability : null;
+  return {
+    providerVenueId: value.providerVenueId as string,
+    name: value.name as string,
+    ...(nonEmptyString(value.address) && { address: value.address as string }),
+    latitude: value.latitude,
+    longitude: value.longitude,
+    categories: value.categories.flatMap((category) =>
+      typeof category === "string" && category.trim() ? [category.trim()] : [],
+    ),
+    provider: typeof value.provider === "string" ? value.provider : "openstreetmap",
+    attribution: value.attribution as string,
+    ...(nonEmptyString(value.retrievedAt) && { retrievedAt: value.retrievedAt as string }),
+    ...(nonEmptyString(value.website) && { website: value.website as string }),
+    ...(nonEmptyString(value.phone) && { phone: value.phone as string }),
+    ...(nonEmptyString(value.email) && { email: value.email as string }),
+    ...(sourceMetadata && {
+      sourceMetadata: {
+        ...(nonEmptyString(sourceMetadata.basicCategory) && { basicCategory: sourceMetadata.basicCategory as string }),
+        ...(Array.isArray(sourceMetadata.taxonomy) && {
+          taxonomy: sourceMetadata.taxonomy.flatMap((item) => typeof item === "string" && item.trim() ? [item.trim()] : []),
+        }),
+        ...(nonEmptyString(sourceMetadata.operatingStatus) && { operatingStatus: sourceMetadata.operatingStatus as string }),
+        ...(sources?.length && { sources }),
+      },
+    }),
+    ...(suitability &&
+    typeof suitability.score === "number" &&
+    nonEmptyString(suitability.scoreLabel) &&
+    nonEmptyString(suitability.explanation)
+      ? {
+          suitability: {
+            score: suitability.score,
+            scoreLabel: suitability.scoreLabel as string,
+            explanation: suitability.explanation as string,
+            evidence: Array.isArray(suitability.evidence)
+              ? suitability.evidence.flatMap((item): SavedPlanEvidenceItem[] => {
+                  if (!isRecord(item)) return [];
+                  const label = nonEmptyString(item.label);
+                  const itemValue = nonEmptyString(item.value);
+                  return typeof item.kind === "string" && label && itemValue
+                    ? [{ kind: item.kind, label, value: itemValue }]
+                    : [];
+                })
+              : [],
+            missingData: Array.isArray(suitability.missingData)
+              ? suitability.missingData.flatMap((item) => typeof item === "string" && item.trim() ? [item.trim()] : [])
+              : [],
+          },
+        }
+      : {}),
+  };
+}
+
 export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
   const record = isRecord(plan) ? plan : {};
   const sections = Array.isArray(record.sections)
@@ -95,63 +188,16 @@ export function getSavedPlanDetails(plan: unknown): SavedPlanDetails {
   const planningEstimates = isRecord(record.planningEstimates)
     ? record.planningEstimates
     : {};
-  const venue = isRecord(record.selectedVenue) ? record.selectedVenue : null;
-  const selectedVenue: SavedPlanVenue | null =
-    venue &&
-    nonEmptyString(venue.providerVenueId) &&
-    nonEmptyString(venue.name) &&
-    typeof venue.latitude === "number" &&
-    typeof venue.longitude === "number" &&
-    Array.isArray(venue.categories) &&
-    nonEmptyString(venue.attribution)
-      ? {
-          providerVenueId: venue.providerVenueId as string,
-          name: venue.name as string,
-          ...(nonEmptyString(venue.address) ? { address: venue.address as string } : {}),
-          latitude: venue.latitude,
-          longitude: venue.longitude,
-          categories: venue.categories.flatMap((category) =>
-            typeof category === "string" && category.trim()
-              ? [category.trim()]
-              : [],
-          ),
-          provider: typeof venue.provider === "string" ? venue.provider : "openstreetmap",
-          attribution: venue.attribution as string,
-          ...(nonEmptyString(venue.retrievedAt) ? { retrievedAt: venue.retrievedAt as string } : {}),
-          ...(isRecord(venue.suitability) &&
-          typeof venue.suitability.score === "number" &&
-          nonEmptyString(venue.suitability.scoreLabel) &&
-          nonEmptyString(venue.suitability.explanation)
-            ? {
-                suitability: {
-                  score: venue.suitability.score,
-                  scoreLabel: venue.suitability.scoreLabel as string,
-                  explanation: venue.suitability.explanation as string,
-                  evidence: Array.isArray(venue.suitability.evidence)
-                    ? venue.suitability.evidence.flatMap((item): SavedPlanEvidenceItem[] => {
-                        if (!isRecord(item)) return [];
-                        const label = nonEmptyString(item.label);
-                        const value = nonEmptyString(item.value);
-                        return typeof item.kind === "string" && label && value
-                          ? [{ kind: item.kind, label, value }]
-                          : [];
-                      })
-                    : [],
-                  missingData: Array.isArray(venue.suitability.missingData)
-                    ? venue.suitability.missingData.flatMap((item) =>
-                        typeof item === "string" && item.trim() ? [item.trim()] : [],
-                      )
-                    : [],
-                },
-              }
-            : {}),
-        }
-      : null;
+  const selectedVenues = Array.isArray(record.selectedVenues)
+    ? record.selectedVenues.map(parseSavedVenue).filter((venue): venue is SavedPlanVenue => Boolean(venue))
+    : [parseSavedVenue(record.selectedVenue)].filter((venue): venue is SavedPlanVenue => Boolean(venue));
+  const selectedVenue = selectedVenues[0] ?? null;
 
   return {
     sections,
     evidence,
     selectedVenue,
+    selectedVenues,
     source: nonEmptyString(record.source),
     caveat: nonEmptyString(record.caveat),
     assumptions,

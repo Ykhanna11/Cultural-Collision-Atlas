@@ -12,6 +12,7 @@ export interface VenueMapBounds {
 interface VenueMapProps {
   venues: Venue[];
   selectedVenueId?: string;
+  selectedVenueIds?: string[];
   onSelect: (venue: Venue) => void;
   onBoundsChange: (bounds: VenueMapBounds) => void;
   fitRequest: number;
@@ -20,6 +21,7 @@ interface VenueMapProps {
 export function VenueMap({
   venues,
   selectedVenueId,
+  selectedVenueIds = [],
   onSelect,
   onBoundsChange,
   fitRequest,
@@ -27,6 +29,7 @@ export function VenueMap({
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const ignoreNextMoveEndRef = useRef(false);
   const onSelectRef = useRef(onSelect);
   const onBoundsChangeRef = useRef(onBoundsChange);
   onSelectRef.current = onSelect;
@@ -35,8 +38,8 @@ export function VenueMap({
   useEffect(() => {
     if (!elementRef.current || mapRef.current) return;
     const map = L.map(elementRef.current, {
-      center: [0, 0],
-      zoom: 2,
+      center: [51.5, -0.125],
+      zoom: 14,
       scrollWheelZoom: true,
     });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -44,6 +47,10 @@ export function VenueMap({
       maxZoom: 19,
     }).addTo(map);
     const publishBounds = () => {
+      if (ignoreNextMoveEndRef.current) {
+        ignoreNextMoveEndRef.current = false;
+        return;
+      }
       const bounds = map.getBounds();
       onBoundsChangeRef.current({
         south: bounds.getSouth(),
@@ -53,15 +60,7 @@ export function VenueMap({
       });
     };
     map.on("moveend", publishBounds);
-    map.on("click", (event: L.LeafletMouseEvent) => {
-      const span = 0.04;
-      onBoundsChangeRef.current({
-        south: event.latlng.lat - span / 2,
-        west: event.latlng.lng - span / 2,
-        north: event.latlng.lat + span / 2,
-        east: event.latlng.lng + span / 2,
-      });
-    });
+    map.whenReady(publishBounds);
     mapRef.current = map;
     const invalidateSize = () => map.invalidateSize({ pan: false });
     const resizeObserver = new ResizeObserver(invalidateSize);
@@ -82,8 +81,11 @@ export function VenueMap({
     for (const marker of markersRef.current.values()) marker.remove();
     markersRef.current.clear();
 
+    const seen = new Set<string>();
     for (const venue of venues) {
-      const selected = venue.providerVenueId === selectedVenueId;
+      if (seen.has(venue.providerVenueId)) continue;
+      seen.add(venue.providerVenueId);
+      const selected = venue.providerVenueId === selectedVenueId || selectedVenueIds.includes(venue.providerVenueId);
       const marker = L.marker([venue.latitude, venue.longitude], {
         icon: L.divIcon({
           className: "venue-map-marker",
@@ -96,7 +98,7 @@ export function VenueMap({
       marker.on("click", () => onSelectRef.current(venue));
       markersRef.current.set(venue.providerVenueId, marker);
     }
-  }, [venues, selectedVenueId]);
+  }, [venues, selectedVenueId, selectedVenueIds]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -104,7 +106,14 @@ export function VenueMap({
     const bounds = L.latLngBounds(
       venues.map((venue) => [venue.latitude, venue.longitude]),
     );
-    map.fitBounds(bounds.pad(0.18), { maxZoom: 16 });
+    const paddedBounds = bounds.pad(0.18);
+    if (!map.getBounds().equals(paddedBounds)) {
+      ignoreNextMoveEndRef.current = true;
+      map.once("moveend", () => {
+        ignoreNextMoveEndRef.current = false;
+      });
+      map.fitBounds(paddedBounds, { maxZoom: 16 });
+    }
   }, [fitRequest, venues]);
 
   return (

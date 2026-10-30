@@ -10,17 +10,39 @@ export interface ActivationPlanDraft {
   form: DiscoveryInput;
   candidate: BridgeCandidate;
   response: DiscoveryResponse;
-  venue?: {
-    providerVenueId: string;
-    name: string;
-    address?: string;
-    latitude: number;
-    longitude: number;
-    categories: string[];
-    attribution: string;
-    retrievedAt?: string;
-  };
+  venue?: ActivationPlanVenue;
+  venues?: ActivationPlanVenue[];
+  venueSuitabilities?: Record<string, VenueSuitabilityContext>;
   venueSuitability?: VenueSuitabilityContext;
+}
+
+export interface ActivationPlanVenue {
+  provider?: string;
+  providerVenueId: string;
+  name: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  categories: string[];
+  website?: string;
+  phone?: string;
+  email?: string;
+  openingHours?: string;
+  sourceMetadata?: {
+    basicCategory?: string;
+    taxonomy?: string[];
+    operatingStatus?: string;
+    sources?: Array<{
+      dataset?: string;
+      license?: string;
+      provider?: string;
+      recordId?: string;
+      version?: string;
+    }>;
+  };
+  suitability?: VenueSuitabilityContext;
+  attribution: string;
+  retrievedAt?: string;
 }
 
 export interface VenueSuitabilityContext {
@@ -35,14 +57,27 @@ export interface VenueSuitabilityContext {
   missingData: string[];
 }
 
+function venuesForDraft(draft: ActivationPlanDraft): ActivationPlanVenue[] {
+  return draft.venues?.length ? draft.venues : draft.venue ? [draft.venue] : [];
+}
+
+function suitabilityForVenue(draft: ActivationPlanDraft, venue: ActivationPlanVenue, index: number) {
+  return draft.venueSuitabilities?.[venue.providerVenueId] ?? (index === 0 ? draft.venueSuitability : undefined);
+}
+
 export function buildSelectedVenueSection(draft: ActivationPlanDraft) {
-  if (!draft.venue) return null;
-  const suitability = draft.venueSuitability
-    ? `\nVenue assessment: ${draft.venueSuitability.scoreLabel}. ${draft.venueSuitability.explanation}\nEvidence: ${draft.venueSuitability.evidence.map((item) => `${item.label}: ${item.value}`).join(" | ") || "No evidence returned."}${draft.venueSuitability.missingData.length ? `\nMissing data: ${draft.venueSuitability.missingData.join("; ")}` : ""}`
-    : "\nVenue assessment: not requested.";
+  const venues = venuesForDraft(draft);
+  if (!venues.length) return null;
+  const facts = venues.map((venue, index) => {
+    const suitability = suitabilityForVenue(draft, venue, index);
+    const assessment = suitability
+      ? ` Assessment: ${suitability.scoreLabel}. ${suitability.explanation} Evidence: ${suitability.evidence.map((item) => `${item.label}: ${item.value}`).join(" | ") || "No evidence returned."}${suitability.missingData.length ? ` Missing data: ${suitability.missingData.join("; ")}.` : ""}`
+      : " Assessment: not requested.";
+    return `${venue.name}; address: ${venue.address ?? "not provided"}; coordinates: ${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}; provider ID: ${venue.providerVenueId}; categories: ${venue.categories.join(", ") || "not provided"}; source: ${venue.attribution}.${assessment}`;
+  });
   return {
-    title: "Selected venue · provider facts",
-    content: `Provider-sourced venue facts: ${draft.venue.name}; address: ${draft.venue.address ?? "not provided"}; coordinates: ${draft.venue.latitude.toFixed(5)}, ${draft.venue.longitude.toFixed(5)}; provider ID: ${draft.venue.providerVenueId}; categories: ${draft.venue.categories.join(", ") || "not provided"}; source: ${draft.venue.attribution}.${suitability}\nAI recommendations are hypotheses and do not confirm venue availability, suitability, permissions, accessibility, capacity, costs, or campaign outcomes.`,
+    title: "Selected venues · provider facts",
+    content: `Provider-sourced venue facts:\n${facts.map((fact, index) => `${index + 1}. ${fact}`).join("\n")}\nAI recommendations are hypotheses and do not confirm venue availability, suitability, permissions, accessibility, capacity, costs, or campaign outcomes.`,
   };
 }
 
@@ -50,7 +85,15 @@ export function buildDiscoverySaveInput(
   form: DiscoveryInput,
   response: DiscoveryResponse,
   candidate: BridgeCandidate,
+  venues: ActivationPlanVenue[] = [],
+  venueSuitabilities: Record<string, VenueSuitabilityContext> = {},
 ) {
+  const selectedVenues = venues.map((venue) => ({
+    ...venue,
+    ...(venueSuitabilities[venue.providerVenueId] && {
+      suitability: venueSuitabilities[venue.providerVenueId],
+    }),
+  }));
   return {
     title: `${form.interestA} × ${form.interestB}`,
     city: form.city,
@@ -61,11 +104,13 @@ export function buildDiscoverySaveInput(
       generatedAt: response.generatedAt,
       caveat: response.caveat,
       selectedBridge: candidate,
+      ...(selectedVenues.length > 0 && { selectedVenues }),
     },
   };
 }
 
 export function buildActivationPlanContent(draft: ActivationPlanDraft) {
+  const venues = venuesForDraft(draft);
   return {
     sections: [
       {
@@ -84,8 +129,8 @@ export function buildActivationPlanContent(draft: ActivationPlanDraft) {
       },
       {
         title: "Venue options",
-        content: draft.venue
-          ? `Provider-sourced venue: ${draft.venue.name}${draft.venue.address ? `, ${draft.venue.address}` : ""}. Categories: ${draft.venue.categories.join(", ") || "not provided"}. Coordinates: ${draft.venue.latitude.toFixed(5)}, ${draft.venue.longitude.toFixed(5)}. Verify suitability, availability, accessibility, permissions, capacity and costs before planning.`
+        content: venues.length
+          ? `${venues.map((venue) => `Provider-sourced venue: ${venue.name}${venue.address ? `, ${venue.address}` : ""}. Categories: ${venue.categories.join(", ") || "not provided"}. Coordinates: ${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}. Provider ID: ${venue.providerVenueId}. Source: ${venue.attribution}`).join("\n")}\nVerify suitability, availability, accessibility, permissions, capacity and costs before planning.`
           : "None sourced. No venue has been selected, so no venue names, addresses, capacities, availability, or suitability claims are included.",
       },
       {
@@ -239,6 +284,13 @@ export function buildActivationPlanSaveInput(
     ? buildActivationStrategySections(agentResult.strategy)
     : [];
   const selectedVenueSection = buildSelectedVenueSection(draft);
+  const venues = venuesForDraft(draft);
+  const selectedVenues = venues.map((venue, index) => ({
+    ...venue,
+    ...(suitabilityForVenue(draft, venue, index) && {
+      suitability: suitabilityForVenue(draft, venue, index),
+    }),
+  }));
   return {
     title,
     city: draft.form.city,
@@ -250,12 +302,10 @@ export function buildActivationPlanSaveInput(
       ...plan,
       sections: aiGenerated
         ? [...strategySections, ...(selectedVenueSection ? [selectedVenueSection] : [])]
-        : plan.sections,
-      ...(draft.venue && {
-        selectedVenue: {
-          ...draft.venue,
-          ...(draft.venueSuitability && { suitability: draft.venueSuitability }),
-        },
+        : [...plan.sections, ...(selectedVenueSection ? [selectedVenueSection] : [])],
+      ...(selectedVenues.length > 0 && {
+        selectedVenue: selectedVenues[0],
+        selectedVenues,
       }),
       strategySource: agentResult?.source ?? "deterministic_fallback",
       ...(agentResult && {
@@ -277,6 +327,7 @@ export interface SavedDiscoveryDetails {
   candidate: BridgeCandidate | null;
   source: string | null;
   caveat: string | null;
+  venues: ActivationPlanVenue[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -305,9 +356,21 @@ export function getSavedDiscoveryDetails(
   const candidate = isBridgeCandidate(result.selectedBridge)
     ? result.selectedBridge
     : null;
+  const venues = Array.isArray(result.selectedVenues)
+    ? result.selectedVenues.filter((venue): venue is ActivationPlanVenue =>
+        isRecord(venue) &&
+        typeof venue.providerVenueId === "string" &&
+        typeof venue.name === "string" &&
+        typeof venue.latitude === "number" &&
+        typeof venue.longitude === "number" &&
+        Array.isArray(venue.categories) &&
+        typeof venue.attribution === "string",
+      ) as ActivationPlanVenue[]
+    : [];
   return {
     candidate,
     source: typeof result.source === "string" ? result.source : null,
     caveat: typeof result.caveat === "string" ? result.caveat : null,
+    venues,
   };
 }

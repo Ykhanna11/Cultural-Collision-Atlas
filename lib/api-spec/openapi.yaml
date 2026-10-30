@@ -301,13 +301,19 @@ paths:
               $ref: "#/components/schemas/VenueSearchInput"
       responses:
         "200":
-          description: Normalized OpenStreetMap venues
+          description: Normalized Overture Places venues, or an explicitly configured OpenStreetMap fallback
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/VenueSearchResponse"
         "502":
           description: Venue provider unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Overture data is not configured or does not cover the requested area
           content:
             application/json:
               schema:
@@ -738,9 +744,29 @@ components:
         rating: { type: number }
         ratingCount: { type: integer }
         openingHours: { type: string }
+        sourceMetadata:
+          $ref: "#/components/schemas/VenueSourceMetadata"
         attribution: { type: string }
         retrievedAt: { type: string, format: date-time }
       required: [provider, providerVenueId, name, latitude, longitude, categories, attribution, retrievedAt]
+    VenueSourceMetadata:
+      type: object
+      properties:
+        basicCategory: { type: string }
+        taxonomy:
+          type: array
+          items: { type: string }
+        operatingStatus: { type: string }
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              dataset: { type: string }
+              license: { type: string }
+              provider: { type: string }
+              recordId: { type: string }
+              version: { type: string }
     VenueProviderStatus:
       type: object
       properties:

@@ -66,6 +66,8 @@ export * from './venueSearchInputCategoriesItem';
 export * from './venueSearchInputRadius';
 export * from './venueSearchResponse';
 export * from './venueSearchResponseSource';
+export * from './venueSourceMetadata';
+export * from './venueSourceMetadataSourcesItem';
 export * from './venueSuitabilityEvidence';
 export * from './venueSuitabilityEvidenceKind';
 export * from './venueSuitabilityInput';

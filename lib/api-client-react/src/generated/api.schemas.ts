@@ -631,6 +631,21 @@ export const VenueProvider = {
   overture: 'overture',
 } as const;
 
+export type VenueSourceMetadataSourcesItem = {
+  dataset?: string;
+  license?: string;
+  provider?: string;
+  recordId?: string;
+  version?: string;
+};
+
+export interface VenueSourceMetadata {
+  basicCategory?: string;
+  taxonomy?: string[];
+  operatingStatus?: string;
+  sources?: VenueSourceMetadataSourcesItem[];
+}
+
 export interface Venue {
   provider: VenueProvider;
   /** @minLength 1 */
@@ -655,6 +670,7 @@ export interface Venue {
   rating?: number;
   ratingCount?: number;
   openingHours?: string;
+  sourceMetadata?: VenueSourceMetadata;
   attribution: string;
   retrievedAt: string;
 }
@@ -724,7 +740,6 @@ export type VenueSearchResponseSource = typeof VenueSearchResponseSource[keyof t
 
 export const VenueSearchResponseSource = {
   openstreetmap: 'openstreetmap',
-  overture: 'overture',
   overture: 'overture',
 } as const;
 

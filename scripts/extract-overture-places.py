@@ -24,6 +24,26 @@ def main() -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / "places.geo.parquet"
+    manifest_path = output_dir / "coverage.json"
+    manifest = {
+        "release": args.release,
+        "west": args.west,
+        "south": args.south,
+        "east": args.east,
+        "north": args.north,
+    }
+    if output.exists():
+        try:
+            existing_manifest = json.loads(manifest_path.read_text(encoding="utf8"))
+        except (OSError, json.JSONDecodeError):
+            existing_manifest = None
+        if output.is_file() and output.stat().st_size > 0 and existing_manifest == manifest:
+            print(json.dumps({"output": str(output), "coverage": str(manifest_path), "reused": True, **manifest}))
+            return 0
+        parser.error("places.geo.parquet already exists with different or missing coverage metadata; choose another output directory to avoid overwriting data")
+    if manifest_path.exists():
+        parser.error("coverage.json already exists without places.geo.parquet; choose another output directory to avoid overwriting data")
+
     subprocess.run([
         executable,
         "download",
@@ -38,15 +58,8 @@ def main() -> int:
         "--output",
         str(output),
     ], check=True)
-    manifest = {
-        "release": args.release,
-        "west": args.west,
-        "south": args.south,
-        "east": args.east,
-        "north": args.north,
-    }
-    (output_dir / "coverage.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf8")
-    print(json.dumps({"output": str(output), "coverage": str(output_dir / "coverage.json"), **manifest}))
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf8")
+    print(json.dumps({"output": str(output), "coverage": str(manifest_path), **manifest}))
     return 0
 
 

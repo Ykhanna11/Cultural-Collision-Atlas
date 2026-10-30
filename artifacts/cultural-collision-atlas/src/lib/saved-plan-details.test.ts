@@ -40,6 +40,7 @@ test("saved plan details separate persisted evidence and planning content", () =
       strategySource: null,
       userProvidedAssumptions: [],
       selectedVenue: null,
+      selectedVenues: [],
     },
   );
 });
@@ -58,6 +59,7 @@ test("older or incomplete saved plans return empty details without throwing", ()
       strategySource: null,
       userProvidedAssumptions: [],
       selectedVenue: null,
+      selectedVenues: [],
     },
   );
   assert.deepEqual(getSavedPlanDetails(null), {
@@ -71,6 +73,7 @@ test("older or incomplete saved plans return empty details without throwing", ()
     strategySource: null,
     userProvidedAssumptions: [],
     selectedVenue: null,
+    selectedVenues: [],
   });
 });
 
@@ -99,4 +102,38 @@ test("saved plan details reopen persisted venue facts and assessment evidence", 
   assert.equal(details.selectedVenue?.providerVenueId, "node-123");
   assert.deepEqual(details.selectedVenue?.categories, ["culture", "event_space"]);
   assert.equal(details.selectedVenue?.suitability?.evidence[0]?.kind, "qloo_evidence");
+});
+
+test("reopens multiple selected Overture venues with source metadata", () => {
+  const details = getSavedPlanDetails({
+    selectedVenues: [
+      {
+        provider: "overture",
+        providerVenueId: "overture-one",
+        name: "Community Hall",
+        latitude: 51.5,
+        longitude: -0.1,
+        categories: ["culture", "event_space"],
+        attribution: "Overture Maps Places, test release.",
+        website: "https://example.test",
+        sourceMetadata: {
+          basicCategory: "event_venue",
+          taxonomy: ["event_venue", "community_centre"],
+          sources: [{ dataset: "Microsoft", license: "CDLA-Permissive-2.0", recordId: "record-1" }],
+        },
+      },
+      {
+        provider: "overture",
+        providerVenueId: "overture-two",
+        name: "Museum",
+        latitude: 51.51,
+        longitude: -0.11,
+        categories: ["museum", "culture"],
+        attribution: "Overture Maps Places, test release.",
+      },
+    ],
+  });
+  assert.equal(details.selectedVenue?.providerVenueId, "overture-one");
+  assert.deepEqual(details.selectedVenues.map((venue) => venue.providerVenueId), ["overture-one", "overture-two"]);
+  assert.equal(details.selectedVenues[0].sourceMetadata?.sources?.[0]?.recordId, "record-1");
 });

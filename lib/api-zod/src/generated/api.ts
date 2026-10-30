@@ -613,6 +613,18 @@ export const SearchVenuesResponse = zod.object({
   "rating": zod.number().optional(),
   "ratingCount": zod.number().int().optional(),
   "openingHours": zod.string().optional(),
+  "sourceMetadata": zod.object({
+  "basicCategory": zod.string().optional(),
+  "taxonomy": zod.array(zod.string()).optional(),
+  "operatingStatus": zod.string().optional(),
+  "sources": zod.array(zod.object({
+  "dataset": zod.string().optional(),
+  "license": zod.string().optional(),
+  "provider": zod.string().optional(),
+  "recordId": zod.string().optional(),
+  "version": zod.string().optional()
+})).optional()
+}).optional(),
   "attribution": zod.string(),
   "retrievedAt": zod.coerce.date()
 })),

@@ -61,6 +61,28 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
+function readSelectedVenues(): Venue[] {
+  try {
+    const raw = sessionStorage.getItem('atlas:selected-venues');
+    if (raw) {
+      const venues = JSON.parse(raw) as unknown;
+      if (Array.isArray(venues)) return venues as Venue[];
+    }
+    const legacy = sessionStorage.getItem('atlas:selected-venue');
+    return legacy ? [JSON.parse(legacy) as Venue] : [];
+  } catch {
+    return [];
+  }
+}
+
+function readVenueAssessments(): NonNullable<ActivationPlanDraft['venueSuitabilities']> {
+  try {
+    return JSON.parse(sessionStorage.getItem('atlas:selected-venue-suitabilities') ?? '{}') as NonNullable<ActivationPlanDraft['venueSuitabilities']>;
+  } catch {
+    return {};
+  }
+}
+
 function Button({
   children, variant = 'quiet', className, ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'quiet' | 'outline' | 'danger' }) {
@@ -376,7 +398,7 @@ function DiscoveryPage() {
   const saveResult = (candidate: BridgeCandidate) => {
     if (!response) return;
     dispatchSaveFeedback({ type: 'clear' });
-    save.mutate({ data: buildDiscoverySaveInput(form, response, candidate) }, {
+    save.mutate({ data: buildDiscoverySaveInput(form, response, candidate, readSelectedVenues(), readVenueAssessments()) }, {
       onSuccess: () => { dispatchSaveFeedback({ type: 'success', message: 'Discovery saved to your evidence trail.' }); qc.invalidateQueries({ queryKey: getListSavedDiscoveriesQueryKey() }); qc.invalidateQueries({ queryKey: getGetAtlasOverviewQueryKey() }); },
       onError: () => dispatchSaveFeedback({ type: 'error', message: 'Discovery could not be saved. Please try again.' }),
     });
@@ -544,16 +566,23 @@ function AtlasPage() {
   const [venueRadiusMode, setVenueRadiusMode] = useState(false);
   const [venueRadiusKm, setVenueRadiusKm] = useState(5);
   const [venueBounds, setVenueBounds] = useState<VenueMapBounds>({
-    south: -0.02, west: -0.02, north: 0.02, east: 0.02,
+    south: 51.45, west: -0.20, north: 51.55, east: -0.05,
   });
   const [venues, setVenues] = useState<Venue[]>([]);
   const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
-  const [shortlist, setShortlist] = useState<string[]>([]);
+  const [shortlistedVenues, setShortlistedVenues] = useState<Record<string, Venue>>(() =>
+    Object.fromEntries(readSelectedVenues().map((venue) => [venue.providerVenueId, venue])),
+  );
+  const [shortlist, setShortlist] = useState<string[]>(() => Object.keys(shortlistedVenues));
+  const [venueAssessments, setVenueAssessments] = useState<Record<string, NonNullable<ActivationPlanDraft['venueSuitability']>>>(() => readVenueAssessments());
   const [fitRequest, setFitRequest] = useState(0);
-  const handleMapBounds = useCallback((bounds: VenueMapBounds) => setVenueBounds(bounds), []);
+  const autoSearchEnabled = useRef(false);
+  const latestVenueSearch = useRef(0);
+  const handleMapBounds = useCallback((bounds: VenueMapBounds) => setVenueBounds((current) =>
+    Object.keys(bounds).every((key) => bounds[key as keyof VenueMapBounds] === current[key as keyof VenueMapBounds]) ? current : bounds,
+  ), []);
   const handleVenueSelect = useCallback((venue: Venue) => {
     setSelectedVenue(venue);
-    sessionStorage.removeItem('atlas:selected-venue-suitability');
     let interests: { interestA?: string; interestB?: string; candidate?: BridgeCandidate } = {};
     try {
       const rawDraft = sessionStorage.getItem('atlas:draft-plan');
@@ -577,14 +606,21 @@ function AtlasPage() {
         interestA: interests.interestA || 'local culture',
         interestB: interests.interestB || 'community experiences',
         bridgeName: interests.candidate?.name || entityQuery || undefined,
-        categories: venue.categories,
+        categories: venueCategory ? [venueCategory] : [],
         qlooEvidence: interests.candidate?.evidence ?? [],
       },
     }, {
-      onSuccess: (assessment) => sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(assessment)),
+      onSuccess: (assessment) => setVenueAssessments((current) => {
+        const next = { ...current, [venue.providerVenueId]: assessment };
+        sessionStorage.setItem('atlas:selected-venue-suitabilities', JSON.stringify(next));
+        sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(assessment));
+        return next;
+      }),
     });
-  }, [entityQuery, venueSuitability]);
+  }, [entityQuery, venueCategory, venueSuitability]);
   const searchVenues = () => {
+    autoSearchEnabled.current = true;
+    const requestId = ++latestVenueSearch.current;
     venueSearch.mutate({
       data: {
         ...(venueRadiusMode ? {
@@ -600,11 +636,42 @@ function AtlasPage() {
       },
     }, {
       onSuccess: (result) => {
+        if (requestId !== latestVenueSearch.current) return;
         setVenues(result.venues);
         setSelectedVenue(null);
         setFitRequest((value) => value + 1);
       },
     });
+  };
+  useEffect(() => {
+    if (!autoSearchEnabled.current) return;
+    const timer = window.setTimeout(searchVenues, 450);
+    return () => window.clearTimeout(timer);
+  }, [venueBounds, venueCategory, venueQuery, venueRadiusMode, venueRadiusKm]);
+  const toggleVenueShortlist = (venue: Venue) => {
+    const isSelected = shortlist.includes(venue.providerVenueId);
+    setShortlist((current) => isSelected
+      ? current.filter((id) => id !== venue.providerVenueId)
+      : [...current, venue.providerVenueId],
+    );
+    setShortlistedVenues((current) => {
+      const next = { ...current };
+      if (isSelected) delete next[venue.providerVenueId];
+      else next[venue.providerVenueId] = venue;
+      sessionStorage.setItem('atlas:selected-venues', JSON.stringify(Object.values(next)));
+      return next;
+    });
+  };
+  const useVenuesInPlanner = (venueOverride?: Venue[]) => {
+    const selected = venueOverride ?? shortlist.map((id) => shortlistedVenues[id]).filter((venue): venue is Venue => Boolean(venue));
+    const venuesToUse = selected.length ? selected : selectedVenue ? [selectedVenue] : [];
+    if (!venuesToUse.length) return;
+    sessionStorage.setItem('atlas:selected-venues', JSON.stringify(venuesToUse));
+    sessionStorage.setItem('atlas:selected-venue', JSON.stringify(venuesToUse[0]));
+    sessionStorage.setItem('atlas:selected-venue-suitabilities', JSON.stringify(venueAssessments));
+    const suitability = venueAssessments[venuesToUse[0].providerVenueId];
+    if (suitability) sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(suitability));
+    window.location.assign('/plans');
   };
   const searchCatalog = () => {
     if (!entityQuery.trim()) return;
@@ -624,9 +691,11 @@ function AtlasPage() {
     const lons = points.map((p) => p.longitude);
     return { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLon: Math.min(...lons), maxLon: Math.max(...lons) };
   }, [points]);
+  const selectedVenueAssessment = selectedVenue ? venueAssessments[selectedVenue.providerVenueId] : undefined;
   return <div className="page-in">
     <PageTitle kicker="02 / geographic context" title="Opportunity Atlas" detail="Explore geography only when a connected source returns spatial evidence. No venue pins, addresses, or neighborhood claims are fabricated." right={<StatusPill status={status.data} />} />
     {venueProvider.isError && <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200/15 bg-amber-100/[.035] p-4"><MapPin size={16} className="mt-0.5 shrink-0 text-[#dbb969]" /><div><div className="text-[12px] font-semibold text-[#ded1ac]">Venue provider status unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#928a77]">Venue discovery could not be reached. The existing heatmap remains available.</p></div></div>}
+    {!venueProvider.isLoading && venueProvider.data && <div className={cx('mb-5 rounded-xl border px-4 py-3', venueProvider.data.configured ? 'border-emerald-100/15 bg-emerald-100/[.025]' : 'border-amber-100/15 bg-amber-100/[.025]')}><div className="text-[10px] font-semibold text-[#cbd1df]">Primary venue source · Overture Maps Places</div><p className="mt-1 text-[9px] leading-5 text-[#929db1]">{venueProvider.data.message}</p></div>}
     {!status.isLoading && !status.data?.configured && <div className="mb-5 flex items-start gap-3 rounded-xl border border-white/[.09] bg-white/[.02] p-4"><Globe2 size={16} className="mt-0.5 shrink-0 text-[#858fa4]" /><div><div className="text-[12px] font-semibold text-[#bdc4d2]">Heatmap source unavailable</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">Qloo is not configured for this workspace. Geographic signal requests are disabled until an administrator configures the source.</p></div></div>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <Panel className="min-h-[490px]">
@@ -657,8 +726,8 @@ function AtlasPage() {
             <Button variant="primary" className="w-full" disabled={!city.trim() || !entityId.trim() || heatmap.isPending || !status.data?.configured} type="submit"><Radar size={14} />Request spatial signal</Button>
           </form>
           <div className="mt-5 border-t border-white/[.07] pt-4">
-            <div className="eyebrow text-[9px] text-[#78849a]">OpenStreetMap venues</div>
-            <p className="mt-1 text-[9px] leading-4 text-[#79859a]">Move or zoom the venue map, then search the visible area. No paid provider or API key is required.</p>
+            <div className="eyebrow text-[9px] text-[#78849a]">Overture Maps Places</div>
+            <p className="mt-1 text-[9px] leading-4 text-[#79859a]">Search the bounded local extract. After the first search, map movement and filter changes refresh results after a short pause.</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Field label="Venue name"><input value={venueQuery} onChange={(event) => setVenueQuery(event.target.value)} className="field" placeholder="Optional name" /></Field>
               <Field label="Venue category"><select value={venueCategory} onChange={(event) => setVenueCategory(event.target.value as VenueSearchInputCategoriesItem | '')} className="field" aria-label="Venue category"><option value="">All venues</option><option value="restaurant">Restaurants</option><option value="cafe">Cafes</option><option value="shopping">Shopping</option><option value="entertainment">Entertainment</option><option value="sports">Sports</option><option value="culture">Culture</option><option value="museum">Museums</option><option value="event_space">Event spaces</option></select></Field>
@@ -670,17 +739,17 @@ function AtlasPage() {
             <Button variant="outline" className="mt-3 w-full" onClick={searchVenues} disabled={venueSearch.isPending}><Search size={14} />{venueSearch.isPending ? 'Searching map area…' : 'Search visible map area'}</Button>
           </div>
         </Panel>
-        <Panel><div className="eyebrow text-[9px] text-[#78849a]">How to read this</div><div className="mt-3 space-y-3"><EvidenceLegend color="bg-[#67d9e2]" title="Returned coordinates" description="Only plotted when supplied by the API." /><EvidenceLegend color="bg-[#e5b96d]" title="Venue layer" description={overview.data?.venueProviderConfigured ? 'Provider configured; venue coverage is still source-dependent.' : 'Not configured for this workspace.'} /></div><div className="mt-4 border-t border-white/[.07] pt-3 text-[9px] leading-5 text-[#747f94]">A point field is not a venue recommendation or proof of event suitability.</div></Panel>
+        <Panel><div className="eyebrow text-[9px] text-[#78849a]">How to read this</div><div className="mt-3 space-y-3"><EvidenceLegend color="bg-[#67d9e2]" title="Returned coordinates" description="Only plotted when supplied by the API." /><EvidenceLegend color="bg-[#e5b96d]" title="Venue layer" description={venueProvider.isLoading ? 'Checking Overture dataset status.' : venueProvider.isError ? 'Venue source status is unavailable.' : venueProvider.data?.state === 'reachable' ? 'Overture data was queried successfully; coverage is limited to the configured extract.' : venueProvider.data?.configured ? 'An Overture extract was found; query it to verify contents and coverage.' : 'No Overture extract is configured.'} /></div><div className="mt-4 border-t border-white/[.07] pt-3 text-[9px] leading-5 text-[#747f94]">A point field is not a venue recommendation or proof of event suitability.</div></Panel>
       </div>
     </div>
     <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_390px]">
       <Panel>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div><div className="eyebrow text-[9px] text-[#78849a]">Free venue discovery</div><h2 className="mt-1 text-[16px] font-semibold">OpenStreetMap venue intelligence</h2></div>
-          <span className="text-[9px] text-[#7d899e]">© OpenStreetMap contributors</span>
+          <div><div className="eyebrow text-[9px] text-[#78849a]">Local venue data</div><h2 className="mt-1 text-[16px] font-semibold">Overture Maps Places</h2></div>
+          <span className="text-[9px] text-[#7d899e]">{venueSearch.data?.source === 'openstreetmap' ? '© OpenStreetMap contributors' : 'Overture Maps Places · source notices apply'}</span>
         </div>
-        {venueSearch.isError ? <ErrorNotice title="Venue discovery unavailable" onRetry={searchVenues} /> : <VenueMap venues={venues} selectedVenueId={selectedVenue?.providerVenueId} onSelect={handleVenueSelect} onBoundsChange={handleMapBounds} fitRequest={fitRequest} />}
-        {venues.length === 0 && !venueSearch.isPending && <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Pan and zoom the map, choose a category, then search. No sample or invented venues are displayed.</p>}
+        {venueSearch.isError ? <ErrorNotice title="Venue discovery unavailable" onRetry={searchVenues} /> : <VenueMap venues={venues} selectedVenueId={selectedVenue?.providerVenueId} selectedVenueIds={shortlist} onSelect={handleVenueSelect} onBoundsChange={handleMapBounds} fitRequest={fitRequest} />}
+        {venues.length === 0 && !venueSearch.isPending && !venueSearch.isError && <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Search this London map area to load actual Overture records. Empty results are shown as empty; no venues are fabricated.</p>}
       </Panel>
       <div className="space-y-5">
         <Panel>
@@ -688,44 +757,55 @@ function AtlasPage() {
           <h2 className="mt-1 text-[15px] font-semibold">{venues.length} mapped locations</h2>
           {shortlist.length > 0 && (
             <div className="mt-2 text-[9px] leading-4 text-[#a8b0c0]">
-              Shortlisted: {venues.filter((venue) => shortlist.includes(venue.providerVenueId)).map((venue) => venue.name).join(' · ') || `${shortlist.length} venue${shortlist.length === 1 ? '' : 's'}`}
+              Selected for plan: {shortlist.map((id) => shortlistedVenues[id]?.name).filter(Boolean).join(' · ') || `${shortlist.length} venue${shortlist.length === 1 ? '' : 's'}`}
             </div>
           )}
-          {venueSearch.isPending ? <div className="mt-4 grid place-items-center py-12 text-[10px] text-[#8e99ad]"><LoaderCircle className="mb-2 animate-spin" size={18} />Searching Overpass…</div> : venues.length === 0 ? <p className="mt-4 text-[10px] leading-5 text-[#818ca1]">No provider results loaded for this map area.</p> : (
+          {venueSearch.isPending ? <div className="mt-4 grid place-items-center py-12 text-[10px] text-[#8e99ad]"><LoaderCircle className="mb-2 animate-spin" size={18} />Searching local venue data…</div> : venues.length === 0 ? <p className="mt-4 text-[10px] leading-5 text-[#818ca1]">No venues matched this search area and filter.</p> : (
             <div className="mt-4 max-h-[270px] space-y-2 overflow-auto pr-1">
               {venues.map((venue) => (
                 <div key={venue.providerVenueId} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') handleVenueSelect(venue); }} onClick={() => handleVenueSelect(venue)} className={cx('w-full cursor-pointer rounded-xl border px-3 py-3 text-left', selectedVenue?.providerVenueId === venue.providerVenueId ? 'border-cyan-200/30 bg-cyan-100/[.05]' : 'border-white/[.07] bg-white/[.018] hover:bg-white/[.04]')}>
-                  <div className="flex items-start justify-between gap-2"><span className="text-[11px] font-semibold text-[#d8dde8]">{venue.name}</span><button type="button" aria-label={`${shortlist.includes(venue.providerVenueId) ? 'Remove' : 'Add'} ${venue.name} ${shortlist.includes(venue.providerVenueId) ? 'from' : 'to'} shortlist`} onClick={(event) => { event.stopPropagation(); setShortlist((current) => current.includes(venue.providerVenueId) ? current.filter((id) => id !== venue.providerVenueId) : [...current, venue.providerVenueId]); }} className={cx('text-[#9b8be4]', shortlist.includes(venue.providerVenueId) && 'text-amber-200')}><Bookmark size={13} fill={shortlist.includes(venue.providerVenueId) ? 'currentColor' : 'none'} /></button></div>
+                  <div className="flex items-start justify-between gap-2"><span className="text-[11px] font-semibold text-[#d8dde8]">{venue.name}</span><button type="button" aria-label={`${shortlist.includes(venue.providerVenueId) ? 'Remove' : 'Add'} ${venue.name} ${shortlist.includes(venue.providerVenueId) ? 'from' : 'to'} activation plan`} aria-pressed={shortlist.includes(venue.providerVenueId)} onClick={(event) => { event.stopPropagation(); toggleVenueShortlist(venue); }} className={cx('text-[#9b8be4]', shortlist.includes(venue.providerVenueId) && 'text-amber-200')}><Bookmark size={13} fill={shortlist.includes(venue.providerVenueId) ? 'currentColor' : 'none'} /></button></div>
                   <div className="mt-1 text-[9px] text-[#8995aa]">{venue.categories.join(', ')}{venue.address ? ` · ${venue.address}` : ''}</div>
+                  {venueAssessments[venue.providerVenueId] && <div className="mt-2 text-[8px] text-[#aeb7c8]">Operational data-fit · {venueAssessments[venue.providerVenueId].score}/100 · not a cultural relevance score</div>}
                 </div>
               ))}
             </div>
           )}
+          {shortlist.length > 0 && <Button variant="primary" className="mt-4 w-full" onClick={() => useVenuesInPlanner()}><FileText size={14} />Use {shortlist.length} selected venue{shortlist.length === 1 ? '' : 's'} in activation planner</Button>}
         </Panel>
         <Panel>
           <div className="eyebrow text-[9px] text-[#78849a]">Selected venue</div>
           {!selectedVenue ? <p className="mt-3 text-[10px] leading-5 text-[#818ca1]">Select a marker or result to inspect provider facts and cultural suitability.</p> : (
             <div className="mt-3">
               <h3 className="text-[14px] font-semibold">{selectedVenue.name}</h3>
-              <p className="mt-1 text-[9px] text-[#8793a8]">{selectedVenue.address || `${selectedVenue.latitude.toFixed(5)}, ${selectedVenue.longitude.toFixed(5)}`}</p>
+              {selectedVenue.address && <p className="mt-1 text-[9px] text-[#8793a8]">{selectedVenue.address}</p>}
+              <p className="mt-1 mono text-[9px] text-[#8793a8]">{selectedVenue.latitude.toFixed(5)}, {selectedVenue.longitude.toFixed(5)}</p>
               <div className="mt-3 flex flex-wrap gap-2">{selectedVenue.categories.map((category) => <span key={category} className="rounded-full border border-white/[.09] px-2 py-1 text-[8px] text-[#aeb6c7]">{category}</span>)}</div>
               {selectedVenue.website && <a href={selectedVenue.website} target="_blank" rel="noreferrer" className="mt-3 block break-all text-[10px] text-[#86dbe3]">Provider website <ExternalLink size={10} className="inline" /></a>}
-              {venueSuitability.isPending ? <p className="mt-4 text-[10px] text-[#8c97ac]">Evaluating evidence…</p> : venueSuitability.data && (
+              {selectedVenue.phone && <p className="mt-2 text-[10px] text-[#aab3c7]">Phone · {selectedVenue.phone}</p>}
+              {selectedVenue.email && <p className="mt-2 break-all text-[10px] text-[#aab3c7]">Email · {selectedVenue.email}</p>}
+              {selectedVenue.openingHours && <p className="mt-2 text-[10px] text-[#aab3c7]">Hours · {selectedVenue.openingHours}</p>}
+              {selectedVenue.sourceMetadata?.basicCategory && <p className="mt-2 text-[9px] text-[#929db1]">Source category · {selectedVenue.sourceMetadata.basicCategory}{selectedVenue.sourceMetadata.taxonomy?.length ? ` · ${selectedVenue.sourceMetadata.taxonomy.join(' / ')}` : ''}</p>}
+              {selectedVenue.sourceMetadata?.operatingStatus && <p className="mt-2 text-[9px] text-[#929db1]">Source-reported operating status · {selectedVenue.sourceMetadata.operatingStatus}</p>}
+              <div className="mt-3 border-t border-white/[.07] pt-3 text-[8px] leading-4 text-[#737f94]">{selectedVenue.attribution}</div>
+              {selectedVenue.sourceMetadata?.sources?.map((source, index) => <div key={`${source.provider ?? source.dataset ?? 'source'}-${index}`} className="mt-1 text-[8px] leading-4 text-[#737f94]">{[source.dataset, source.license, source.recordId && `record ${source.recordId}`].filter(Boolean).join(' · ')}</div>)}
+              {venueSuitability.isPending ? <p className="mt-4 text-[10px] text-[#8c97ac]">Evaluating evidence…</p> : selectedVenueAssessment && (
                 <div className="mt-4 rounded-xl border border-violet-200/10 bg-violet-100/[.025] p-3">
-                  <div className="text-[19px] font-semibold text-[#b8a7f4]">{venueSuitability.data.score}<span className="text-[9px] text-[#858fa3]"> / 100 operational data-fit</span></div>
-                  <div className="mt-1 text-[9px] leading-4 text-[#858fa3]">{venueSuitability.data.scoreLabel}</div>
-                  <p className="mt-3 text-[10px] leading-5 text-[#aeb7c8]">{venueSuitability.data.explanation}</p>
-                  <div className="mt-3 space-y-2">{venueSuitability.data.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="border-t border-white/[.06] pt-2"><div className="text-[9px] font-semibold text-[#cbd1df]">{item.label}</div><p className="mt-1 text-[9px] leading-4 text-[#8995aa]">{item.value}</p></div>)}</div>
+                  <div className="text-[19px] font-semibold text-[#b8a7f4]">{selectedVenueAssessment.score}<span className="text-[9px] text-[#858fa3]"> / 100 operational data-fit</span></div>
+                  <div className="mt-1 text-[9px] leading-4 text-[#858fa3]">{selectedVenueAssessment.scoreLabel}</div>
+                  <p className="mt-3 text-[10px] leading-5 text-[#aeb7c8]">{selectedVenueAssessment.explanation}</p>
+                  <div className="mt-3 space-y-2">{selectedVenueAssessment.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="border-t border-white/[.06] pt-2"><div className="text-[9px] font-semibold text-[#cbd1df]">{item.label}</div><p className="mt-1 text-[9px] leading-4 text-[#8995aa]">{item.value}</p></div>)}</div>
                 </div>
               )}
               <Button variant="primary" className="mt-4 w-full" onClick={() => {
-                sessionStorage.setItem('atlas:selected-venue', JSON.stringify(selectedVenue));
-                if (venueSuitability.data) {
-                  sessionStorage.setItem('atlas:selected-venue-suitability', JSON.stringify(venueSuitability.data));
+                const selected = shortlist.map((id) => shortlistedVenues[id]).filter((venue): venue is Venue => Boolean(venue));
+                if (!shortlist.includes(selectedVenue.providerVenueId)) {
+                  toggleVenueShortlist(selectedVenue);
+                  selected.push(selectedVenue);
                 }
-                window.location.assign('/plans');
-              }}><FileText size={14} />Use in activation planner</Button>
-              <p className="mt-2 text-[8px] leading-4 text-[#747f94]">The planner preserves its existing deterministic fallback. OpenStreetMap facts are not treated as ratings or audience proof.</p>
+                useVenuesInPlanner(selected);
+              }}><FileText size={14} />Use selected venues in activation planner</Button>
+              <p className="mt-2 text-[8px] leading-4 text-[#747f94]">Venue facts and Qloo cultural evidence remain separate. Provider attributes do not establish audience fit or campaign performance.</p>
             </div>
           )}
         </Panel>
@@ -741,22 +821,20 @@ function PlansPage() {
   const generateAgentPlan = useGenerateActivationPlanWithAgent();
   const deletePlan = useDeleteActivationPlan();
   const [deleteFeedback, dispatchDeleteFeedback] = useReducer(mutationFeedbackReducer, null);
-  const [venueContext] = useState<ActivationPlanDraft['venue'] | null>(() => {
-    try {
-      const raw = sessionStorage.getItem('atlas:selected-venue');
-      return raw ? JSON.parse(raw) as ActivationPlanDraft['venue'] : null;
-    } catch { return null; }
-  });
+  const [venueContext] = useState<ActivationPlanDraft['venues']>(() => readSelectedVenues());
   const [draft, setDraft] = useState<ActivationPlanDraft | null>(() => {
     try {
       const raw = sessionStorage.getItem('atlas:draft-plan');
       if (!raw) return null;
       const parsed = JSON.parse(raw) as ActivationPlanDraft;
-      const venueRaw = sessionStorage.getItem('atlas:selected-venue');
+      const venues = readSelectedVenues();
+      const suitabilityMapRaw = sessionStorage.getItem('atlas:selected-venue-suitabilities');
       const suitabilityRaw = sessionStorage.getItem('atlas:selected-venue-suitability');
-      return venueRaw ? {
+      return venues.length ? {
         ...parsed,
-        venue: JSON.parse(venueRaw) as ActivationPlanDraft['venue'],
+        venue: venues[0],
+        venues,
+        ...(suitabilityMapRaw ? { venueSuitabilities: JSON.parse(suitabilityMapRaw) as ActivationPlanDraft['venueSuitabilities'] } : {}),
         ...(suitabilityRaw ? { venueSuitability: JSON.parse(suitabilityRaw) as ActivationPlanDraft['venueSuitability'] } : {}),
       } : parsed;
     } catch { return null; }
@@ -825,12 +903,11 @@ function PlansPage() {
   };
   return <div className="page-in">
     <PageTitle kicker="03 / activation planning" title="Activation Planner" detail="Translate an evidence-backed bridge into a reviewable brief. Strategic ideas are clearly identified as hypotheses; budgets remain planning inputs." />
-    {!draft && venueContext && <Panel className="mb-5">
-      <div className="eyebrow text-[9px] text-[#78849a]">Selected venue context</div>
-      <h2 className="mt-1 text-[15px] font-semibold">{venueContext.name}</h2>
-      <p className="mt-1 text-[10px] leading-5 text-[#8994a9]">{venueContext.address || `${venueContext.latitude.toFixed(5)}, ${venueContext.longitude.toFixed(5)}`} · {venueContext.categories.join(', ') || 'category not provided'}</p>
-      <p className="mt-3 text-[9px] leading-5 text-[#8994a9]">Create a discovery brief in Discovery Studio to generate and save a venue-aware activation plan. Venue facts will remain attached to the brief.</p>
-      <Button variant="outline" type="button" className="mt-4" onClick={() => window.location.assign('/discovery')}><Sparkles size={14} />Create discovery brief</Button>
+    {!draft && venueContext && venueContext.length > 0 && <Panel className="mb-5">
+      <div className="eyebrow text-[9px] text-[#78849a]">Selected venue context · {venueContext.length}</div>
+      <div className="mt-3 space-y-3">{venueContext.map((venue) => <div key={venue.providerVenueId} className="border-t border-white/[.07] pt-3 first:border-0 first:pt-0"><h2 className="text-[13px] font-semibold">{venue.name}</h2><p className="mt-1 text-[10px] leading-5 text-[#8994a9]">{venue.address || `${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}`} · {venue.categories.join(', ') || 'category not provided'}</p><p className="mt-1 text-[8px] text-[#737f94]">{venue.attribution}</p></div>)}</div>
+      <p className="mt-3 text-[9px] leading-5 text-[#8994a9]">Create a discovery brief in Discovery Studio to generate and save a venue-aware activation plan. These provider facts will remain attached to the brief.</p>
+      <Button variant="outline" type="button" className="mt-4" onClick={() => window.location.assign('/discover')}><Sparkles size={14} />Create discovery brief</Button>
     </Panel>}
     {draft && planContent && <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
       <Panel><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow text-[9px] text-[#8d7ec3]">Current working brief</div><h2 className="mt-1 text-[18px] font-semibold">{draft.candidate.name}</h2><p className="mt-1 text-[11px] text-[#8d98ad]">{draft.form.interestA} × {draft.form.interestB} · {draft.form.city}</p></div><span className={cx('rounded-full border px-2.5 py-1 text-[9px]', strategySource === 'ai_generated' ? 'border-cyan-100/20 bg-cyan-100/[.04] text-cyan-100' : 'border-amber-100/20 bg-amber-100/[.04] text-amber-100')}>{strategySource === 'ai_generated' ? 'AI-generated strategy' : 'Deterministic fallback · not AI-generated'}</span></div>
@@ -934,20 +1011,25 @@ function PlanRow({ plan, expanded, onToggle, onExport, onDelete, deleting }: { p
     {expanded && <div className="mt-4 space-y-4 border-t border-white/[.07] pt-4">
       <div className="rounded-lg border border-white/[.07] bg-white/[.018] p-3 text-[10px] leading-5 text-[#aeb8ca]"><div><strong className="text-[#d3d9e5]">Bridge:</strong> {plan.bridgeName || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">Inputs:</strong> {plan.interestA || 'Not recorded'} × {plan.interestB || 'Not recorded'}</div><div><strong className="text-[#d3d9e5]">City/locality:</strong> {plan.city || 'Not recorded'}</div>{plan.objective && <div><strong className="text-[#d3d9e5]">Objective:</strong> {plan.objective}</div>}</div>
       <div className="rounded-lg border border-amber-100/10 bg-amber-100/[.025] p-3 text-[10px] leading-5 text-[#bbaa83]">This is the stored plan snapshot. It does not refresh automatically or remain linked to a discovery record.</div>
-      {details.selectedVenue && <section className="rounded-lg border border-cyan-100/[.1] bg-cyan-100/[.02] p-3" data-testid={`venue-plan-${plan.id}`}>
-        <div className="eyebrow text-[9px] text-[#78849a]">Selected venue · saved provider facts</div>
-        <div className="mt-2 text-[12px] font-semibold text-[#d7dce6]">{details.selectedVenue.name}</div>
-        <div className="mt-1 text-[10px] leading-5 text-[#929db1]">{details.selectedVenue.address || `${details.selectedVenue.latitude.toFixed(5)}, ${details.selectedVenue.longitude.toFixed(5)}`}</div>
-        <div className="mt-1 text-[9px] text-[#929db1]">Categories: {details.selectedVenue.categories.join(', ') || 'Not provided'}</div>
-        <div className="mt-1 mono text-[8px] text-[#737f94]">Coordinates · {details.selectedVenue.latitude.toFixed(5)}, {details.selectedVenue.longitude.toFixed(5)} · Provider ID · {details.selectedVenue.providerVenueId}</div>
-        <div className="mt-1 text-[9px] text-[#737f94]">Source attribution · {details.selectedVenue.attribution}</div>
-        {details.selectedVenue.suitability ? <div className="mt-3 border-t border-white/[.07] pt-3">
-          <div className="text-[10px] font-semibold text-[#cbd1df]">Saved operational assessment · {details.selectedVenue.suitability.score} / 100</div>
-          <div className="mt-1 text-[9px] leading-4 text-[#929db1]">{details.selectedVenue.suitability.scoreLabel}</div>
-          <p className="mt-2 text-[9px] leading-4 text-[#929db1]">{details.selectedVenue.suitability.explanation}</p>
-          {details.selectedVenue.suitability.evidence.length > 0 && <div className="mt-2 space-y-1">{details.selectedVenue.suitability.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="text-[9px] text-[#929db1]"><span className="font-semibold text-[#cbd1df]">{item.label}:</span> {item.value}</div>)}</div>}
-          {details.selectedVenue.suitability.missingData.length > 0 && <div className="mt-2 text-[9px] text-[#bbaa83]">Missing data: {details.selectedVenue.suitability.missingData.join('; ')}</div>}
-        </div> : <p className="mt-3 text-[9px] text-[#929db1]">No saved suitability assessment is available.</p>}
+      {details.selectedVenues.length > 0 && <section className="rounded-lg border border-cyan-100/[.1] bg-cyan-100/[.02] p-3" data-testid={`venue-plan-${plan.id}`}>
+        <div className="eyebrow text-[9px] text-[#78849a]">Selected venues · saved provider facts · {details.selectedVenues.length}</div>
+        <div className="mt-3 space-y-4">{details.selectedVenues.map((venue) => <div key={venue.providerVenueId} className="border-t border-white/[.07] pt-3 first:border-0 first:pt-0">
+          <div className="text-[12px] font-semibold text-[#d7dce6]">{venue.name}</div>
+          <div className="mt-1 text-[10px] leading-5 text-[#929db1]">{venue.address || `${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}`}</div>
+          <div className="mt-1 text-[9px] text-[#929db1]">Categories: {venue.categories.join(', ') || 'Not provided'}</div>
+          <div className="mt-1 mono text-[8px] text-[#737f94]">Coordinates · {venue.latitude.toFixed(5)}, {venue.longitude.toFixed(5)} · Provider ID · {venue.providerVenueId}</div>
+          {venue.website && <div className="mt-1 break-all text-[9px] text-[#929db1]">Website · {venue.website}</div>}
+          {venue.phone && <div className="mt-1 text-[9px] text-[#929db1]">Phone · {venue.phone}</div>}
+          <div className="mt-1 text-[9px] text-[#737f94]">Source attribution · {venue.attribution}</div>
+          {venue.sourceMetadata?.sources?.map((source, index) => <div key={`${source.provider ?? source.dataset ?? 'source'}-${index}`} className="mt-1 text-[8px] text-[#737f94]">Source · {[source.dataset, source.license, source.recordId && `record ${source.recordId}`].filter(Boolean).join(' · ')}</div>)}
+          {venue.suitability ? <div className="mt-3 border-t border-white/[.07] pt-3">
+            <div className="text-[10px] font-semibold text-[#cbd1df]">Saved operational assessment · {venue.suitability.score} / 100</div>
+            <div className="mt-1 text-[9px] leading-4 text-[#929db1]">{venue.suitability.scoreLabel}</div>
+            <p className="mt-2 text-[9px] leading-4 text-[#929db1]">{venue.suitability.explanation}</p>
+            {venue.suitability.evidence.length > 0 && <div className="mt-2 space-y-1">{venue.suitability.evidence.map((item, index) => <div key={`${item.kind}-${index}`} className="text-[9px] text-[#929db1]"><span className="font-semibold text-[#cbd1df]">{item.label}:</span> {item.value}</div>)}</div>}
+            {venue.suitability.missingData.length > 0 && <div className="mt-2 text-[9px] text-[#bbaa83]">Missing data: {venue.suitability.missingData.join('; ')}</div>}
+          </div> : <p className="mt-3 text-[9px] text-[#929db1]">No saved suitability assessment is available.</p>}
+        </div>)}</div>
       </section>}
       <section><div className="eyebrow text-[9px] text-[#78849a]">Stored source evidence</div>{details.source && <div className="mt-1 text-[9px] text-[#909bb0]">Response source: {details.source}</div>}{details.evidence.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.evidence.map((item, index) => <div key={`${item.source}-${index}`} className="rounded-lg border border-cyan-100/[.08] bg-cyan-100/[.02] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-[#c5ccda]">{item.label}</span><EvidenceKind kind={item.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#929db2]">{item.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">Source · {item.source}</div></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored evidence details are available on this plan.</p>}{details.caveat && <p className="mt-2 text-[10px] leading-5 text-[#aab4c6]">Stored caveat: {details.caveat}</p>}</section>
       <section><div className="eyebrow text-[9px] text-[#bca26d]">{details.strategySource === 'ai_generated' ? 'AI-generated strategy · Qloo citations preserved' : details.strategySource === 'deterministic_fallback' ? 'Deterministic fallback · not AI-generated' : 'Stored planning content · historical record'}</div>{details.sections.length ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{details.sections.map((section, index) => <div key={`${section.title}-${index}`} className="rounded-lg border border-amber-100/[.07] bg-amber-100/[.018] p-3"><div className="text-[10px] font-semibold text-[#d2c5a4]">{section.title}</div><p className="mt-1 text-[10px] leading-5 text-[#aeb3bd]">{section.content}</p></div>)}</div> : <p className="mt-2 text-[10px] text-[#8792a6]">No stored planning sections are available.</p>}{details.userProvidedAssumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">User-provided assumptions · not independently verified</div><ul className="mt-1 list-disc pl-4">{details.userProvidedAssumptions.map((assumption, index) => <li key={`user-${index}-${assumption}`}>{assumption}</li>)}</ul></div>}{details.assumptions.length > 0 && <div className="mt-2 text-[10px] text-[#aeb3bd]"><div className="font-semibold text-[#d2c5a4]">Stored planning assumptions</div><ul className="mt-1 list-disc pl-4">{details.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul></div>}</section>
@@ -988,7 +1070,7 @@ function SavedCard({ item, expanded, onExpand, onDelete, deleting }: { item: Sav
   const candidate = savedDetails.candidate;
   const caveat = savedDetails.caveat ?? 'Saved result did not include a source caveat.';
   return <article className="rounded-xl border border-white/[.07] bg-white/[.018] p-4" data-testid={`card-saved-${item.id}`}><div className="flex flex-wrap items-center justify-between gap-3"><button onClick={onExpand} className="min-w-0 flex-1 text-left" data-testid={`button-open-saved-${item.id}`}><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[13px] font-semibold text-[#dce0ea]">{item.title}</h2><span className="rounded-full border border-cyan-100/10 px-2 py-0.5 text-[8px] text-[#7edce3]">Saved record</span></div><div className="mt-1.5 text-[10px] text-[#838ea4]">{item.interestA} <span className="text-[#a995f1]">×</span> {item.interestB} · {item.city} · {formatDate(item.createdAt)}</div></button><div className="flex items-center gap-1"><Button variant="quiet" className="text-[10px]" onClick={onExpand}>{expanded ? 'Close details' : 'Inspect result'}<ChevronDown size={13} className={cx('transition-transform', expanded && 'rotate-180')} /></Button><Button variant="danger" onClick={onDelete} disabled={deleting} aria-label={`Delete ${item.title}`}><Trash2 size={14} /></Button></div></div>
-    {expanded && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="eyebrow text-[9px] text-[#77849a]">Stored response · no refresh implied</div>{candidate ? <div className="mt-3 rounded-lg border border-white/[.07] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="text-[12px] font-semibold text-[#d6dbe7]">{candidate.name}</div><div className="mono text-[11px] text-[#b2a0f1]">{candidate.score}/100 · derived</div></div><p className="mt-2 text-[10px] leading-5 text-[#929db2]">{candidate.explanation}</p>{candidate.evidence?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{candidate.evidence.map((ev, idx) => <div key={idx} className="rounded-lg bg-white/[.025] p-2.5"><div className="flex justify-between gap-2"><span className="text-[10px] text-[#c5ccda]">{ev.label}</span><EvidenceKind kind={ev.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#8995aa]">{ev.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">{ev.source}</div></div>)}</div>}</div> : <div className="text-[10px] text-[#8994a8]">No selected bridge details were stored in this record.</div>}<p className="mt-3 text-[10px] leading-5 text-[#8b96ab]">Caveat: {caveat}</p></div>}
+    {expanded && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="eyebrow text-[9px] text-[#77849a]">Stored response · no refresh implied</div>{candidate ? <div className="mt-3 rounded-lg border border-white/[.07] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="text-[12px] font-semibold text-[#d6dbe7]">{candidate.name}</div><div className="mono text-[11px] text-[#b2a0f1]">{candidate.score}/100 · derived</div></div><p className="mt-2 text-[10px] leading-5 text-[#929db2]">{candidate.explanation}</p>{candidate.evidence?.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{candidate.evidence.map((ev, idx) => <div key={idx} className="rounded-lg bg-white/[.025] p-2.5"><div className="flex justify-between gap-2"><span className="text-[10px] text-[#c5ccda]">{ev.label}</span><EvidenceKind kind={ev.kind} /></div><div className="mt-1 text-[10px] leading-4 text-[#8995aa]">{ev.value}</div><div className="mt-1 mono text-[8px] text-[#717d92]">{ev.source}</div></div>)}</div>}</div> : <div className="text-[10px] text-[#8994a8]">No selected bridge details were stored in this record.</div>}{savedDetails.venues.length > 0 && <section className="mt-3 rounded-lg border border-cyan-100/[.1] bg-cyan-100/[.02] p-3"><div className="eyebrow text-[9px] text-[#78849a]">Associated venue selections · {savedDetails.venues.length}</div><div className="mt-2 space-y-3">{savedDetails.venues.map((venue) => <div key={venue.providerVenueId} className="border-t border-white/[.07] pt-2 first:border-0 first:pt-0"><div className="text-[11px] font-semibold text-[#d7dce6]">{venue.name}</div><div className="mt-1 text-[9px] text-[#929db1]">{venue.address || `${venue.latitude.toFixed(5)}, ${venue.longitude.toFixed(5)}`} · {venue.categories.join(', ') || 'category not provided'}</div><div className="mt-1 mono text-[8px] text-[#737f94]">{venue.providerVenueId} · {venue.attribution}</div></div>)}</div></section>}<p className="mt-3 text-[10px] leading-5 text-[#8b96ab]">Caveat: {caveat}</p></div>}
   </article>;
 }
 
@@ -996,6 +1078,7 @@ function SettingsPage() {
   const qc = useQueryClient();
   const status = useGetQlooStatus();
   const overview = useGetAtlasOverview();
+  const venueProvider = useGetVenueProviderStatus();
   const test = useTestQlooConnection();
   const [testQuery, setTestQuery] = useState('cultural signal verification');
   const [refreshing, setRefreshing] = useState(false);
@@ -1023,7 +1106,7 @@ function SettingsPage() {
           {test.data && <div className="mt-3 rounded-lg border border-white/[.07] p-3"><div className="flex items-center justify-between"><span className="text-[10px] text-[#a7b0c3]">Latest test response</span><StatusPill status={test.data} /></div><p className="mt-2 text-[10px] leading-5 text-[#8792a7]">{test.data.message}</p></div>}
           {!status.data?.configured && !status.isLoading && <div className="mt-4 rounded-xl border border-amber-100/15 bg-amber-100/[.035] p-4"><div className="flex gap-2 text-[11px] font-semibold text-amber-100"><Settings2 size={14} />Setup required</div><p className="mt-2 text-[10px] leading-5 text-[#a19576]">The API reports no configured Qloo credential. Ask a workspace administrator to configure the provider secret on the server, then refresh status and run a connection test. The browser never collects the secret.</p></div>}
         </Panel>
-        <Panel><div className="eyebrow text-[9px] text-[#78849a]">Location data</div><h2 className="mt-1 text-[16px] font-semibold">Venue provider</h2>{overview.isLoading ? <Skeleton className="mt-4 h-14" /> : overview.isError ? <ErrorNotice title="Venue provider status unavailable" onRetry={() => overview.refetch()} /> : <div className="mt-4 flex items-start gap-3 rounded-xl border border-white/[.07] bg-white/[.018] p-4"><MapPin size={16} className={overview.data?.venueProviderConfigured ? 'text-emerald-200' : 'text-[#d9b66b]'} /><div><div className="text-[11px] font-semibold text-[#cfd5e1]">{overview.data?.venueProviderConfigured ? 'Provider configured' : 'Not configured'}</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">{overview.data?.venueProviderConfigured ? 'Venue features remain dependent on provider coverage and returned data.' : 'The Opportunity Atlas will not show venue search or invented place information.'}</p></div></div>}</Panel>
+        <Panel><div className="eyebrow text-[9px] text-[#78849a]">Location data</div><h2 className="mt-1 text-[16px] font-semibold">Venue provider</h2>{venueProvider.isLoading ? <Skeleton className="mt-4 h-14" /> : venueProvider.isError ? <ErrorNotice title="Venue provider status unavailable" onRetry={() => venueProvider.refetch()} /> : <div className="mt-4 flex items-start gap-3 rounded-xl border border-white/[.07] bg-white/[.018] p-4"><MapPin size={16} className={venueProvider.data?.configured ? 'text-emerald-200' : 'text-[#d9b66b]'} /><div><div className="text-[11px] font-semibold text-[#cfd5e1]">{venueProvider.data?.state === 'reachable' ? 'Overture data queried successfully' : venueProvider.data?.configured ? 'Overture extract found; not yet queried' : 'Overture data not configured'}</div><p className="mt-1 text-[10px] leading-5 text-[#828da2]">{venueProvider.data?.message}</p></div></div>}</Panel>
       </div>
       <div className="space-y-5">
         <Panel><div className="eyebrow text-[9px] text-[#78849a]">Workspace counts</div><h2 className="mt-1 text-[15px] font-semibold">Current inventory</h2>{overview.isLoading ? <div className="mt-4 space-y-2"><Skeleton className="h-9" /><Skeleton className="h-9" /></div> : overview.data && <div className="mt-4 space-y-2"><SettingValue label="Saved discoveries" value={String(overview.data.savedDiscoveries)} /><SettingValue label="Saved plans" value={String(overview.data.savedPlans)} /></div>}</Panel>

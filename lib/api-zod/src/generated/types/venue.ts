@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { VenueProvider } from './venueProvider';
+import type { VenueSourceMetadata } from './venueSourceMetadata';
 
 export interface Venue {
   provider: VenueProvider;
@@ -31,6 +32,7 @@ export interface Venue {
   rating?: number;
   ratingCount?: number;
   openingHours?: string;
+  sourceMetadata?: VenueSourceMetadata;
   attribution: string;
   retrievedAt: Date;
 }

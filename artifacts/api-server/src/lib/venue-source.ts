@@ -1,3 +1,5 @@
+import { getOvertureDataStatus } from "./overture";
+
 export interface Venue {
   provider: "openstreetmap" | "overture";
   providerVenueId: string;
@@ -12,18 +14,22 @@ export interface Venue {
   rating?: number;
   ratingCount?: number;
   openingHours?: string;
+  sourceMetadata?: {
+    basicCategory?: string;
+    taxonomy?: string[];
+    operatingStatus?: string;
+    sources?: Array<{
+      dataset?: string;
+      license?: string;
+      provider?: string;
+      recordId?: string;
+      version?: string;
+    }>;
+  };
   attribution: string;
   retrievedAt: string;
 }
 
 export function getVenueSourceStatus() {
-  const overtureDirectory = process.env.OVERTURE_DATA_DIR?.trim();
-  return {
-    configured: Boolean(overtureDirectory),
-    state: "unknown",
-    message:
-      overtureDirectory
-        ? "An Overture local dataset has been configured. Live coverage has not been checked by the status request."
-        : "Overture local venue data is not configured.",
-  };
+  return getOvertureDataStatus();
 }

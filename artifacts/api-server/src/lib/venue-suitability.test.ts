@@ -26,6 +26,26 @@ test("labels provider facts, hypotheses, and missing evidence separately", () =>
   assert.match(assessment.scoreLabel, /not a probability/i);
 });
 
+test("identifies Overture venue facts without claiming cultural audience insights", () => {
+  const assessment = assessVenueSuitability({
+    venue: {
+      provider: "overture",
+      providerVenueId: "overture-1",
+      name: "Community Museum",
+      latitude: 51.5,
+      longitude: -0.1,
+      categories: ["museum", "culture"],
+      attribution: "Overture Maps Places, test release.",
+      retrievedAt: new Date().toISOString(),
+    },
+    interestA: "Jazz",
+    interestB: "Architecture",
+  });
+  assert.match(assessment.explanation, /Overture Maps Places/);
+  assert.ok(assessment.evidence.some((item) => item.kind === "geographic_context" && /Overture/.test(item.value)));
+  assert.ok(assessment.evidence.some((item) => item.kind === "missing_data" && /Qloo/.test(item.label)));
+});
+
 test("propagates actual Qloo evidence without converting it into cultural affinity", () => {
   const assessment = assessVenueSuitability({
     venue: {

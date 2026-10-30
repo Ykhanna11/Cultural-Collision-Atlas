@@ -213,6 +213,69 @@ test("deterministic discovery-save-plan-reopen workflow preserves evidence and c
     "Venue category",
   );
 
+  const multiVenueDraft: ActivationPlanDraft = {
+    ...draft,
+    venues: [
+      {
+        provider: "overture",
+        providerVenueId: "overture-one",
+        name: "Community Hall",
+        address: "1 Main Street",
+        latitude: 51.5,
+        longitude: -0.1,
+        categories: ["culture", "event_space"],
+        website: "https://example.test/venue",
+        attribution: "Overture Maps Places, fixture release.",
+        sourceMetadata: {
+          basicCategory: "event_venue",
+          taxonomy: ["event_venue", "community_centre"],
+          sources: [{ dataset: "Microsoft", license: "CDLA-Permissive-2.0", recordId: "source-1" }],
+        },
+      },
+      {
+        provider: "overture",
+        providerVenueId: "overture-two",
+        name: "Design Museum",
+        latitude: 51.51,
+        longitude: -0.11,
+        categories: ["museum", "culture"],
+        attribution: "Overture Maps Places, fixture release.",
+      },
+    ],
+  };
+  const discoveryWithVenues = buildDiscoverySaveInput(
+    form,
+    response,
+    candidate,
+    multiVenueDraft.venues,
+    {
+      "overture-one": {
+        score: 70,
+        scoreLabel: "Operational data completeness; not cultural relevance",
+        explanation: "Category and source details are available.",
+        evidence: [{ kind: "venue_fact", label: "Venue category", value: "event venue" }],
+        missingData: ["Hours not provided"],
+      },
+    },
+  );
+  const reopenedDiscoveryWithVenues = getSavedDiscoveryDetails(discoveryWithVenues.result);
+  assert.deepEqual(reopenedDiscoveryWithVenues.venues.map((venue) => venue.providerVenueId), ["overture-one", "overture-two"]);
+  assert.equal(reopenedDiscoveryWithVenues.venues[0].sourceMetadata?.sources?.[0]?.recordId, "source-1");
+  assert.equal(reopenedDiscoveryWithVenues.venues[0].suitability?.score, 70);
+
+  const multiVenueContent = buildActivationPlanContent(multiVenueDraft);
+  const multiVenueSaved = buildActivationPlanSaveInput("Two venue options", multiVenueDraft, multiVenueContent);
+  const multiVenueExport = JSON.parse(JSON.stringify(buildActivationPlanExportPayload(
+    "Two venue options",
+    multiVenueDraft,
+    multiVenueContent,
+  ))) as ReturnType<typeof buildActivationPlanExportPayload>;
+  assert.deepEqual(multiVenueSaved.plan.selectedVenues?.map((venue) => venue.providerVenueId), ["overture-one", "overture-two"]);
+  assert.equal(multiVenueSaved.plan.selectedVenue.providerVenueId, "overture-one");
+  assert.equal(multiVenueExport.plan.selectedVenues?.[0]?.sourceMetadata?.sources?.[0]?.recordId, "source-1");
+  assert.equal(getSavedPlanDetails(multiVenueExport.plan).selectedVenues.length, 2);
+  assert.match(multiVenueContent.sections.find((section) => section.title === "Venue options")?.content ?? "", /Design Museum/);
+
   const strategy: ActivationPlannerResponse["strategy"] = {
     executiveSummary: "Test a co-created opt-in pilot; audience fit remains a hypothesis.",
     opportunity: "Explore a bridge suggested by aggregate Qloo Insights results.",
