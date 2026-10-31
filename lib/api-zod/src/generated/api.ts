@@ -1032,3 +1032,51 @@ export const AssessVenueSuitabilityResponse = zod.object({
 })),
   "missingData": zod.array(zod.string())
 })
+
+export const ActivationOpportunityEvidenceCategorySchema = zod.enum([
+  'cultural_affinity',
+  'descriptive_overlap',
+  'geographic_signal',
+  'venue_readiness',
+  'venue_fact',
+  'user_input',
+  'missing_data',
+]);
+
+export const ActivationOpportunityVerifiedEvidenceSchema = zod.object({
+  "source": zod.string(),
+  "sourceReference": zod.string().optional(),
+  "establishes": zod.string(),
+  "category": ActivationOpportunityEvidenceCategorySchema,
+  "observedAt": zod.string().optional(),
+});
+
+export const ActivationOpportunitySuggestionSchema = zod.object({
+  "candidateAudienceHypothesis": zod.string(),
+  "culturalThemes": zod.array(zod.string()),
+  "activationFormats": zod.array(zod.string()),
+  "supportingEvidenceReferences": zod.array(zod.string()),
+  "note": zod.string(),
+});
+
+export const GenerateActivationOpportunitiesBody = zod.object({
+  "analysisReference": zod.string().min(1).max(256),
+  "candidateId": zod.string().min(1).max(160),
+});
+
+export const ActivationOpportunityCandidateSchema = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "opportunityType": zod.string(),
+  "rationale": zod.string(),
+  "verifiedEvidence": zod.array(ActivationOpportunityVerifiedEvidenceSchema),
+  "inferredSuggestions": zod.array(ActivationOpportunitySuggestionSchema),
+  "missingEvidence": zod.array(zod.string()),
+  "limitations": zod.array(zod.string()),
+});
+
+export const GenerateActivationOpportunitiesResponse = zod.object({
+  "status": zod.enum(['ok', 'insufficient_evidence']),
+  "opportunities": zod.array(ActivationOpportunityCandidateSchema),
+  "reason": zod.string().optional(),
+});

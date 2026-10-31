@@ -3,6 +3,8 @@ import {
   GetAtlasOverviewResponse,
   AnalyzeGeographicIntelligenceBody,
   AnalyzeGeographicIntelligenceResponse,
+  GenerateActivationOpportunitiesBody,
+  GenerateActivationOpportunitiesResponse,
   GetOpportunityHeatmapBody,
   GetOpportunityHeatmapResponse,
   GetQlooStatusResponse,
@@ -30,6 +32,7 @@ import {
   getCachedDiscoveryAnalysis,
   getCachedGeographicAnalysis,
 } from "../lib/cultural-intelligence/analysis-cache";
+import { generateActivationOpportunities } from "../lib/cultural-intelligence/opportunity-discovery";
 import { getVenueSourceStatus } from "../lib/venue-source";
 import { providerRateLimit } from "../lib/provider-rate-limit";
 import { readOvertureCoverage, overtureDataDirectory } from "../lib/overture";
@@ -192,6 +195,79 @@ router.post(
       summary,
       ...(analysis && { analysis }),
     }));
+  },
+);
+
+router.post(
+  "/opportunities/intelligence/generate",
+  async (req, res): Promise<void> => {
+    const parsed = GenerateActivationOpportunitiesBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const lookup = getCachedDiscoveryAnalysis(parsed.data.analysisReference, parsed.data.candidateId);
+    if (lookup.status !== "found") {
+      res.status(lookup.status === "candidate_not_found" ? 400 : 410).json({
+        error: lookup.status === "candidate_not_found"
+          ? "The selected candidate does not belong to this Discovery analysis."
+          : "The Discovery analysis reference expired or is unavailable. Run Discovery again.",
+      });
+      return;
+    }
+
+    const summary = lookup.analysis.geographicSnapshot?.summary ?? {
+      requestedBounds: { south: 0, west: 0, north: 0, east: 0 },
+      observedBounds: null,
+      heatmap: {
+        status: "unavailable",
+        source: "Qloo Insights API",
+        pointCount: 0,
+        duplicateCount: 0,
+        invalidCoordinateCount: 0,
+        points: [],
+      },
+      venues: {
+        status: "unavailable",
+        source: "Overture Maps Places",
+        recordCount: 0,
+        duplicateCount: 0,
+        invalidCoordinateCount: 0,
+        categoryCounts: [],
+        records: [],
+      },
+      overtureCoverage: { status: "unknown", bounds: null },
+      coverage: "unavailable",
+      sourceSeparation: "No geographic evidence was preserved in the server-side analysis state.",
+    };
+
+    const analysis = analyzeUnifiedOpportunity({
+      context: lookup.analysis,
+      candidateId: parsed.data.candidateId,
+      geography: summary,
+    });
+
+    const result = generateActivationOpportunities({
+      analysis,
+      context: {
+        interestA: lookup.analysis.input.interestA,
+        interestB: lookup.analysis.input.interestB,
+        city: lookup.analysis.input.city,
+        candidateName: analysis.candidateName,
+        analysisReference: lookup.analysis.analysisReference,
+      },
+      venueRecords: summary.venues.records.map((venue) => ({
+        provider: venue.provider,
+        providerVenueId: venue.providerVenueId,
+        name: venue.name,
+        categories: venue.categories,
+        attribution: venue.attribution,
+        address: venue.address,
+      })),
+    });
+
+    res.json(GenerateActivationOpportunitiesResponse.parse(result));
   },
 );
 

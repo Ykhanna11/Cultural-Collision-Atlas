@@ -469,6 +469,65 @@ export interface BridgeCandidate {
   evidence: EvidenceItem[];
 }
 
+export type ActivationOpportunityEvidenceCategory = typeof ActivationOpportunityEvidenceCategory[keyof typeof ActivationOpportunityEvidenceCategory];
+
+
+export const ActivationOpportunityEvidenceCategory = {
+  cultural_affinity: 'cultural_affinity',
+  descriptive_overlap: 'descriptive_overlap',
+  geographic_signal: 'geographic_signal',
+  venue_readiness: 'venue_readiness',
+  venue_fact: 'venue_fact',
+  user_input: 'user_input',
+  missing_data: 'missing_data',
+} as const;
+
+export interface ActivationOpportunityVerifiedEvidence {
+  source: string;
+  sourceReference?: string;
+  establishes: string;
+  category: ActivationOpportunityEvidenceCategory;
+  observedAt?: string;
+}
+
+export interface ActivationOpportunitySuggestion {
+  candidateAudienceHypothesis: string;
+  culturalThemes: string[];
+  activationFormats: string[];
+  supportingEvidenceReferences: string[];
+  note: string;
+}
+
+export interface ActivationOpportunityCandidate {
+  id: string;
+  title: string;
+  opportunityType: string;
+  rationale: string;
+  verifiedEvidence: ActivationOpportunityVerifiedEvidence[];
+  inferredSuggestions: ActivationOpportunitySuggestion[];
+  missingEvidence: string[];
+  limitations: string[];
+}
+
+export type GenerateActivationOpportunitiesStatus = typeof GenerateActivationOpportunitiesStatus[keyof typeof GenerateActivationOpportunitiesStatus];
+
+
+export const GenerateActivationOpportunitiesStatus = {
+  ok: 'ok',
+  insufficient_evidence: 'insufficient_evidence',
+} as const;
+
+export interface GenerateActivationOpportunitiesInput {
+  analysisReference: string;
+  candidateId: string;
+}
+
+export interface GenerateActivationOpportunitiesResponse {
+  status: GenerateActivationOpportunitiesStatus;
+  opportunities: ActivationOpportunityCandidate[];
+  reason?: string;
+}
+
 export type DiscoveryResponseSource = typeof DiscoveryResponseSource[keyof typeof DiscoveryResponseSource];
 
 

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 
+export * from './activationOpportunityCandidate';
 export * from './activationPlan';
 export * from './activationPlannerInput';
 export * from './activationPlannerResponse';

@@ -1,5 +1,6 @@
 import { lazy, Suspense, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import type { ActivationOpportunityCandidate } from '@workspace/api-zod';
 import {
   Activity, ArrowLeftRight, ArrowRight, Bookmark, Check, ChevronDown,
   CircleHelp, Compass, Download, ExternalLink, FileText, Globe2, Layers3, LoaderCircle,
@@ -15,7 +16,7 @@ import {
   useGetVenueProviderStatus,
   useGetAtlasOverview, useGetQlooStatus, useListActivationPlans,
   useListSavedDiscoveries, useSaveActivationPlan, useSaveDiscovery,
-  useAnalyzeGeographicIntelligence, useSearchQlooEntities, useSearchVenues, useTestQlooConnection,
+  useAnalyzeGeographicIntelligence, useGenerateActivationOpportunities, useSearchQlooEntities, useSearchVenues, useTestQlooConnection,
 } from '@workspace/api-client-react';
 import type {
   ActivationPlan, ActivationPlannerResponse, BridgeCandidate, DiscoveryInput, DiscoveryInputRecommendationType, DiscoveryResponse, EntityEvidence, QlooStatus, Venue, VenueSearchInputCategoriesItem,
@@ -48,9 +49,15 @@ import NotFound from '@/pages/not-found';
 import type { VenueMapBounds } from '@/components/venue-map';
 import { GeographicSummaryPanel } from '@/components/geographic-summary';
 import { AffinityComparisonPanel } from '@/components/affinity-comparison';
+import {
+  isOpportunityResponseCurrent,
+  OpportunityRecommendationsPanel,
+  shouldGenerateOpportunityRecommendations,
+} from '@/components/opportunity-recommendations';
 import { OpportunityScorecard } from '@/components/opportunity-scorecard';
 import { clearSelectedVenueSession, clearVenueDraftSession } from '@/lib/venue-session';
 import { getStaleAnalysisNotice } from '@/lib/stale-analysis';
+import { createOpportunityRequestCoordinator } from '@/lib/opportunity-request-coordinator';
 
 const queryClient = new QueryClient();
 const VenueMap = lazy(async () => {
@@ -665,6 +672,23 @@ function AtlasPage() {
   const [entityId, setEntityId] = useState(analysisContext?.entityId ?? '');
   const geographicAnalysis = useAnalyzeGeographicIntelligence();
   const geographicRequest = useRef<GeographicAnalysisInput | null>(null);
+  const { mutate: generateOpportunities } = useGenerateActivationOpportunities();
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
+  const [opportunityData, setOpportunityData] = useState<{
+    status: 'ok' | 'insufficient_evidence';
+    opportunities: ActivationOpportunityCandidate[];
+    reason?: string;
+  } | undefined>(undefined);
+  const [opportunityError, setOpportunityError] = useState<unknown>(null);
+  const [opportunityLoading, setOpportunityLoading] = useState(false);
+  const opportunityRequestCoordinatorRef = useRef(
+    createOpportunityRequestCoordinator<{
+      status: 'ok' | 'insufficient_evidence';
+      opportunities: ActivationOpportunityCandidate[];
+      reason?: string;
+    }>(),
+  );
+  const opportunityRequestCoordinator = opportunityRequestCoordinatorRef.current;
   const heatmap = {
     ...geographicAnalysis,
     data: geographicAnalysis.data
@@ -678,6 +702,72 @@ function AtlasPage() {
   };
   const geographicSummary = geographicAnalysis.data?.summary;
   const status = useGetQlooStatus();
+  const opportunityContextReady = shouldGenerateOpportunityRecommendations({ analysisContext, city, entityId });
+  useEffect(() => {
+    if (!opportunityContextReady || !analysisContext) {
+      opportunityRequestCoordinator.invalidate();
+      setOpportunityData(undefined);
+      setOpportunityError(null);
+      setOpportunityLoading(false);
+      return;
+    }
+
+    const requestContext = {
+      analysisReference: analysisContext.analysisReference,
+      city: city.trim(),
+      entityId,
+    };
+    const request = opportunityRequestCoordinator.beginRequest(requestContext);
+
+    setOpportunityData(undefined);
+    setOpportunityError(null);
+    setOpportunityLoading(true);
+
+    generateOpportunities({
+      data: {
+        analysisReference: requestContext.analysisReference,
+        candidateId: requestContext.entityId,
+      },
+    }, {
+      onSuccess: (response) => {
+        const isCurrent = opportunityRequestCoordinator.isCurrent(request) &&
+          opportunityRequestCoordinator.isResponseCurrent({
+            activeContext: requestContext,
+            responseContext: requestContext,
+          });
+        if (!isCurrent) return;
+        const coordinatorState = opportunityRequestCoordinator.applySuccess(request, response);
+        if (coordinatorState.ignored) return;
+        setOpportunityData(response);
+        setOpportunityError(null);
+      },
+      onError: (error) => {
+        const isCurrent = opportunityRequestCoordinator.isCurrent(request);
+        if (!isCurrent) return;
+        const coordinatorState = opportunityRequestCoordinator.applyError(request, error);
+        if (coordinatorState.ignored) return;
+        setOpportunityData(undefined);
+        setOpportunityError(error);
+      },
+      onSettled: (_data, _error) => {
+        const isCurrent = opportunityRequestCoordinator.isCurrent(request);
+        if (!isCurrent) return;
+        const coordinatorState = opportunityRequestCoordinator.applySettled(request);
+        if (coordinatorState.ignored) return;
+        setOpportunityLoading(false);
+      },
+    });
+  }, [analysisContext, city, entityId, generateOpportunities, opportunityContextReady]);
+  useEffect(() => {
+    const active: ActivationOpportunityCandidate[] = opportunityData?.opportunities ?? [];
+    if (!active.length) {
+      setSelectedOpportunityId(null);
+      return;
+    }
+    if (!selectedOpportunityId || !active.some((opportunity) => opportunity.id === selectedOpportunityId)) {
+      setSelectedOpportunityId(active[0].id);
+    }
+  }, [opportunityData, selectedOpportunityId]);
   const catalogSearch = useSearchQlooEntities();
   const venueProvider = useGetVenueProviderStatus();
   const venueSearch = useSearchVenues();
@@ -899,6 +989,20 @@ function AtlasPage() {
         {heatmap.data && <div className="mt-3 flex flex-wrap gap-4 text-[9px] text-[#7e8a9f]"><span>Response source: <b className="font-medium text-[#b6c0d2]">{heatmap.data.source}</b></span><span>Points: <b className="font-medium text-[#b6c0d2]">{points.length}</b></span></div>}
         <GeographicSummaryPanel summary={geographicSummary} />
         <OpportunityScorecard analysis={geographicAnalysis.data?.analysis} />
+        <div className="mt-5">
+          <OpportunityRecommendationsPanel
+            analysisContext={analysisContext}
+            city={city}
+            entityId={entityId}
+            status={opportunityData?.status ?? 'ok'}
+            opportunities={opportunityData?.opportunities ?? []}
+            loading={opportunityLoading}
+            error={opportunityError}
+            reason={opportunityData?.reason}
+            onSelectOpportunity={setSelectedOpportunityId}
+            selectedOpportunityId={selectedOpportunityId}
+          />
+        </div>
       </Panel>
       <div className="space-y-5">
         <Panel>

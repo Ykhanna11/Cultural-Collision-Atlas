@@ -277,3 +277,252 @@ test("rejects selected venue readiness when the venue is outside the bounded geo
   const body = await response.json() as { error: string };
   assert.match(body.error, /not part of this bounded geographic result/i);
 });
+
+test("opportunity-discovery endpoint generates candidates for valid analysis state", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const validReference = cacheDiscoveryAnalysis(cachedDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: validReference, candidateId }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    status: "ok" | "insufficient_evidence";
+    opportunities: Array<{ title: string; verifiedEvidence: Array<{ sourceReference?: string }>; inferredSuggestions: Array<{ supportingEvidenceReferences: string[] }> }>;
+  };
+  assert.equal(body.status, "ok");
+  assert.ok(body.opportunities.length > 0);
+  assert.ok(body.opportunities.every((candidate) => candidate.verifiedEvidence.length > 0));
+  assert.ok(body.opportunities.every((candidate) => candidate.inferredSuggestions.every((suggestion) => {
+    return suggestion.supportingEvidenceReferences.every((ref) =>
+      candidate.verifiedEvidence.some((evidence) => evidence.sourceReference === ref),
+    );
+  })));
+});
+
+test("opportunity-discovery endpoint rejects stale and mismatched analysis references", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const expiredReference = cacheDiscoveryAnalysis(cachedDiscovery, Date.now() - (31 * 60 * 1000));
+  const validReference = cacheDiscoveryAnalysis(cachedDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  const expired = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: expiredReference, candidateId }),
+  });
+  assert.equal(expired.status, 410);
+
+  const mismatched = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: validReference, candidateId: "other-candidate" }),
+  });
+  assert.equal(mismatched.status, 400);
+});
+
+test("opportunity-discovery endpoint keeps missing geographic evidence honest and limited", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const validReference = cacheDiscoveryAnalysis(cachedDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: validReference, candidateId }),
+  });
+
+  const body = await response.json() as {
+    status: string;
+    opportunities: Array<{ missingEvidence: string[]; inferredSuggestions: Array<{ activationFormats: string[] }> }>;
+  };
+  assert.equal(response.status, 200);
+  assert.equal(body.status, "ok");
+  assert.ok(body.opportunities.every((candidate) => candidate.missingEvidence.some((entry) => /geographic/i.test(entry))));
+  assert.ok(body.opportunities.every((candidate) => candidate.inferredSuggestions.every((suggestion) => suggestion.activationFormats.every((format) => !/geographic|heatmap/i.test(format)))));
+});
+
+test("opportunity-discovery endpoint rejects unknown analysis references with the existing stale-analysis semantics", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: "unknown-analysis-reference", candidateId }),
+  });
+
+  assert.equal(response.status, 410);
+  const body = await response.json() as { error: string };
+  assert.match(body.error, /expired or is unavailable/i);
+});
+
+test("opportunity-discovery endpoint ignores client-submitted evidence and trusts server-side analysis only", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const validReference = cacheDiscoveryAnalysis(cachedDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      analysisReference: validReference,
+      candidateId,
+      evidence: [{ sourceReference: "client-fabricated-ref" }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    opportunities: Array<{ inferredSuggestions: Array<{ supportingEvidenceReferences: string[] }> }>;
+  };
+  assert.ok(body.opportunities.every((candidate) => candidate.inferredSuggestions.every((suggestion) => !suggestion.supportingEvidenceReferences.includes("client-fabricated-ref"))));
+});
+
+test("opportunity-discovery endpoint returns insufficient evidence when cultural signals are missing", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const insufficientDiscovery = {
+    ...cachedDiscovery,
+    jointResults: { success: true, results: { entities: [] } },
+    tasteAnalysisA: { success: true, results: { tags: [] } },
+    tasteAnalysisB: { success: true, results: { tags: [] } },
+  };
+  const reference = cacheDiscoveryAnalysis(insufficientDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const response = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: reference, candidateId }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as { status: string; opportunities: unknown[]; reason?: string };
+  assert.equal(body.status, "insufficient_evidence");
+  assert.deepEqual(body.opportunities, []);
+  assert.match(body.reason ?? "", /Insufficient evidence/i);
+});
+
+test("opportunity-discovery endpoint is deterministic for identical inputs", async (context) => {
+  const originalFetch = globalThis.fetch;
+  process.env.QLOO_API_KEY = "local-test-placeholder";
+  globalThis.fetch = async () => new Response(JSON.stringify({ results: { heatmap: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const validReference = cacheDiscoveryAnalysis(cachedDiscovery);
+  const server = createServer(createApp());
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    globalThis.fetch = originalFetch;
+    delete process.env.QLOO_API_KEY;
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const first = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: validReference, candidateId }),
+  });
+  const second = await originalFetch(`http://127.0.0.1:${address.port}/api/opportunities/intelligence/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ analysisReference: validReference, candidateId }),
+  });
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.deepEqual(await first.json(), await second.json());
+});
